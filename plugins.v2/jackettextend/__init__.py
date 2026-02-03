@@ -12,11 +12,10 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from app.helper.sites import SitesHelper
 
-from app.core.context import TorrentInfo
 from app.log import logger
 from app.plugins import _PluginBase
 from app.core.config import settings
-from app.schemas import MediaType
+from app.schemas import MediaType, TorrentInfo
 from app.utils.dom import DomUtils
 from app.utils.http import RequestUtils
 from app.utils.string import StringUtils
@@ -30,7 +29,7 @@ class JackettExtend(_PluginBase):
     # 插件图标
     plugin_icon = "Jackett_A.png"
     # 插件版本
-    plugin_version = "1.3"
+    plugin_version = "1.4"
     # 插件作者
     plugin_author = "jtcymc"
     # 作者主页
