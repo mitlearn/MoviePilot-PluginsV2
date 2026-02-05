@@ -101,7 +101,7 @@ class JackettExtend(_PluginBase):
         # 停止现有任务
         self.stop_service()
 
-        # 如果插件未启用，直接返回
+        # 如果插件未启用，停止后直接返回
         if not self._enabled:
             return
 
@@ -112,8 +112,18 @@ class JackettExtend(_PluginBase):
         if not self._indexers:
             self._sync_indexers()
 
-        # 注册索引器到系统
-        self._register_indexers()
+        # 遍历并注册所有索引器到系统
+        for indexer in self._indexers:
+            domain = indexer.get("domain", "")
+            if not domain:
+                continue
+            # 检查是否已注册
+            site_info = self._sites_helper.get_indexer(domain)
+            if not site_info:
+                # 注册新索引器
+                new_indexer = copy.deepcopy(indexer)
+                self._sites_helper.add_indexer(domain, new_indexer)
+                logger.debug(f"【{self.plugin_name}】已注册索引器: {indexer.get('name')}")
 
     def _validate_config(self) -> bool:
         """

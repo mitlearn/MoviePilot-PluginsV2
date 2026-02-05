@@ -95,19 +95,26 @@ class ProwlarrExtend(_PluginBase):
         # 停止现有任务
         self.stop_service()
 
-        # 如果插件未启用，直接返回
-        if not self._enabled:
-            return
+        # 启动定时任务（仅在启用时）
+        if self._enabled:
+            self._setup_scheduler()
 
-        # 启动定时任务
-        self._setup_scheduler()
-
-        # 初始加载索引器
+        # 初始加载索引器并注册到系统（无论是否启用都执行，用于站点管理）
         if not self._indexers:
             self._sync_indexers()
 
-        # 注册索引器到系统
-        self._register_indexers()
+        # 遍历并注册所有索引器到系统
+        for indexer in self._indexers:
+            domain = indexer.get("domain", "")
+            if not domain:
+                continue
+            # 检查是否已注册
+            site_info = self._sites_helper.get_indexer(domain)
+            if not site_info:
+                # 注册新索引器
+                new_indexer = copy.deepcopy(indexer)
+                self._sites_helper.add_indexer(domain, new_indexer)
+                logger.debug(f"【{self.plugin_name}】已注册索引器: {indexer.get('name')}")
 
     def _validate_config(self) -> bool:
         """
