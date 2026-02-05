@@ -3,23 +3,24 @@
     "name": "JackettExtend",
     "description": "扩展检索以支持 Jackett 站点资源",
     "labels": "索引器,Jackett",
-    "version": "1.4",
+    "version": "2.0",
     "icon": "Jackett_A.png",
-    "author": "shaw",
+    "author": "Claude_code",
     "level": 1,
     "history": {
       "v1.0": "适配MoviePilot V2 版本",
       "v1.1": "修复已知问题",
       "v1.2": "修复已知问题",
       "v1.3": "适配MoviePilot v2.6.8及以后的版本",
-      "v1.4": "修复TorrentInfo导入路径，适配最新MoviePilot API"
+      "v1.4": "修复TorrentInfo导入路径，适配最新MoviePilot API",
+      "v2.0": "重写"
     }
   },
   "ProwlarrExtend": {
     "name": "ProwlarrExtend",
     "description": "扩展检索以支持Prowlarr站点资源",
     "labels": "索引器,Prowlarr",
-    "version": "1.4",
+    "version": "2.0",
     "icon": "Prowlarr.png",
     "author": "shaw",
     "level": 1,
@@ -29,7 +30,8 @@
       "v1.1.1": "修复链接取值",
       "v1.2": "修复已知问题",
       "v1.3": "适配MoviePilot v2.6.8及以后的版本",
-      "v1.4": "修复TorrentInfo导入路径，适配最新MoviePilot API"
+      "v1.4": "修复TorrentInfo导入路径，适配最新MoviePilot API",
+      "v2.0": "重写"
     }
   }
 }
