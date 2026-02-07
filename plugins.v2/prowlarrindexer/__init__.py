@@ -460,13 +460,31 @@ class ProwlarrIndexer(_PluginBase):
                                 'content': [{
                                     'component': 'VAlert',
                                     'props': {
-                                        'type': 'info',
+                                        'type': 'success',
                                         'variant': 'tonal',
-                                        'text': '使用说明：\n'
-                                                '1. 在Prowlarr中添加并配置好索引器\n'
-                                                '2. 填写Prowlarr地址和API Key\n'
-                                                '3. 启用插件后，索引器将自动注册到MoviePilot\n'
-                                                '4. 在站点管理中添加对应站点即可使用搜索功能'
+                                        'text': '使用说明：'
+                                                '1. 在Prowlarr中添加并配置好索引器；'
+                                                '2. 填写Prowlarr地址和API Key并启用插件；'
+                                                '3. 点击"立即同步一次"获取索引器列表；'
+                                                '4. 前往 设置->搜索->索引站点 勾选需要启用的Prowlarr索引器；'
+                                                '5. 搜索时将自动使用已启用的Prowlarr索引器'
+                                    }
+                                }]
+                            }
+                        ]
+                    },
+                    {
+                        'component': 'VRow',
+                        'content': [
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12},
+                                'content': [{
+                                    'component': 'VAlert',
+                                    'props': {
+                                        'type': 'warning',
+                                        'variant': 'tonal',
+                                        'text': '注意：无需在"站点管理"中手动添加站点！插件会自动注册索引器到搜索系统。'
                                     }
                                 }]
                             }
