@@ -44,7 +44,7 @@ class JackettIndexer(_PluginBase):
     plugin_name = "Jackett索引器"
     plugin_desc = "扩展MoviePilot搜索功能，支持通过Jackett聚合多个索引站点进行资源检索"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "2.0"
+    plugin_version = "2.2"
     plugin_author = "Claude"
     author_url = "https://github.com/anthropics"
     plugin_config_prefix = "jackett_indexer_"
@@ -87,9 +87,6 @@ class JackettIndexer(_PluginBase):
         # Stop any existing scheduler
         self.stop_service()
 
-        if not self._enabled:
-            return
-
         # Initialize scheduler for periodic indexer updates
         self._scheduler = BackgroundScheduler(timezone=settings.TZ)
 
@@ -114,11 +111,11 @@ class JackettIndexer(_PluginBase):
             self._scheduler.print_jobs()
             self._scheduler.start()
 
-        # Initial indexer load
+        # Initial indexer load and register
         if not self._indexers:
             self._refresh_indexers()
 
-        # Register indexers with MoviePilot
+        # Register indexers with MoviePilot (always, regardless of _enabled)
         self._register_indexers()
 
     def _normalize_host(self, host: str) -> str:

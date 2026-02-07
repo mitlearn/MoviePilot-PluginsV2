@@ -3,11 +3,13 @@
     "name": "Prowlarr索引器",
     "description": "扩展MoviePilot搜索功能，支持通过Prowlarr聚合多个索引站点进行资源检索",
     "labels": "索引器,搜索,Prowlarr",
-    "version": "2.0",
+    "version": "2.2",
     "icon": "Prowlarr.png",
     "author": "Claude",
     "level": 1,
     "history": {
+      "v2.2": "修复索引器注册逻辑，确保索引器正确出现在搜索站点列表",
+      "v2.1": "修正使用说明，明确无需在站点管理中添加站点",
       "v2.0": "全新重构，优化代码结构，增强稳定性",
       "v1.0": "初始版本，基于jtcymc的实现"
     }
@@ -16,11 +18,13 @@
     "name": "Jackett索引器",
     "description": "扩展MoviePilot搜索功能，支持通过Jackett聚合多个索引站点进行资源检索",
     "labels": "索引器,搜索,Jackett",
-    "version": "2.0",
+    "version": "2.2",
     "icon": "Jackett_A.png",
     "author": "Claude",
     "level": 1,
     "history": {
+      "v2.2": "修复索引器注册逻辑，确保索引器正确出现在搜索站点列表",
+      "v2.1": "修正使用说明，明确无需在站点管理中添加站点",
       "v2.0": "全新重构，优化代码结构，增强稳定性",
       "v1.0": "初始版本，基于jtcymc的实现"
     }

@@ -40,7 +40,7 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "Prowlarr索引器"
     plugin_desc = "扩展MoviePilot搜索功能，支持通过Prowlarr聚合多个索引站点进行资源检索"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "2.0"
+    plugin_version = "2.2"
     plugin_author = "Claude"
     author_url = "https://github.com/anthropics"
     plugin_config_prefix = "prowlarr_indexer_"
@@ -81,9 +81,6 @@ class ProwlarrIndexer(_PluginBase):
         # Stop any existing scheduler
         self.stop_service()
 
-        if not self._enabled:
-            return
-
         # Initialize scheduler for periodic indexer updates
         self._scheduler = BackgroundScheduler(timezone=settings.TZ)
 
@@ -108,11 +105,11 @@ class ProwlarrIndexer(_PluginBase):
             self._scheduler.print_jobs()
             self._scheduler.start()
 
-        # Initial indexer load
+        # Initial indexer load and register
         if not self._indexers:
             self._refresh_indexers()
 
-        # Register indexers with MoviePilot
+        # Register indexers with MoviePilot (always, regardless of _enabled)
         self._register_indexers()
 
     def _normalize_host(self, host: str) -> str:
