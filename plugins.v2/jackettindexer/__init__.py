@@ -1,30 +1,21 @@
 # -*- coding: utf-8 -*-
-"""
-Jackett Indexer Plugin for MoviePilot V2
-
-This plugin extends MoviePilot's search capabilities by integrating with Jackett,
-a proxy server that translates queries to tracker-site-specific requests.
-
-Author: Claude (based on jtcymc's work)
-License: MIT
-"""
 import copy
 import traceback
 import xml.dom.minidom
+from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import quote_plus, urlencode
+from urllib.parse import urlencode, quote_plus
 
 import pytz
 import requests
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-
-from app.core.config import settings
-from app.core.context import TorrentInfo
 from app.helper.sites import SitesHelper
+
+from app.core.context import TorrentInfo
 from app.log import logger
 from app.plugins import _PluginBase
+from app.core.config import settings
 from app.schemas import MediaType
 from app.utils.dom import DomUtils
 from app.utils.http import RequestUtils
@@ -32,232 +23,109 @@ from app.utils.string import StringUtils
 
 
 class JackettIndexer(_PluginBase):
-    """
-    Jackett Indexer Plugin
-
-    Integrates Jackett indexers into MoviePilot's search system,
-    allowing users to search across all Jackett-configured indexers
-    using the Torznab API format.
-    """
-
-    # Plugin metadata
-    plugin_name = "Jackett索引器"
+    # 插件名称 - 必须是英文，用于站点名称匹配
+    plugin_name = "JackettIndexer"
+    # 插件描述
     plugin_desc = "扩展MoviePilot搜索功能，支持通过Jackett聚合多个索引站点进行资源检索"
+    # 插件图标
     plugin_icon = "Jackett_A.png"
-    plugin_version = "2.2"
-    plugin_author = "Claude"
+    # 插件版本
+    plugin_version = "2.3"
+    # 插件作者
+    plugin_author = "claude"
+    # 作者主页
     author_url = "https://github.com/anthropics"
+    # 插件配置项ID前缀
     plugin_config_prefix = "jackett_indexer_"
+    # 加载顺序
     plugin_order = 15
+    # 可使用的用户级别
     auth_level = 1
 
-    # Internal state
-    _scheduler: Optional[BackgroundScheduler] = None
-    _enabled: bool = False
-    _host: str = ""
-    _api_key: str = ""
-    _password: str = ""
-    _proxy: bool = False
-    _cron: str = "0 0 */24 * *"
-    _onlyonce: bool = False
-    _indexers: List[Dict[str, Any]] = []
-    _sites_helper: Optional[SitesHelper] = None
+    # 私有属性
+    _scheduler = None
+    _cron = None
+    _enabled = False
+    _proxy = False
+    _host = ""
+    _api_key = ""
+    _password = ""
+    _onlyonce = False
+    _indexers = []
+    sites_helper = None
 
-    # Domain identifier for registered indexers
-    DOMAIN_PREFIX = "jackett.indexer"
+    # 域名标识 - 两段格式
+    jackett_domain = "jackett.indexer"
 
-    def init_plugin(self, config: dict = None) -> None:
+    def init_plugin(self, config: dict = None):
         """
-        Initialize the plugin with user configuration.
-
-        Args:
-            config: Plugin configuration dictionary
+        初始化插件
         """
-        self._sites_helper = SitesHelper()
-
+        self.sites_helper = SitesHelper()
+        # 读取配置
         if config:
-            self._enabled = config.get("enabled", False)
-            self._host = self._normalize_host(config.get("host", ""))
-            self._api_key = config.get("api_key", "")
-            self._password = config.get("password", "")
-            self._proxy = config.get("proxy", False)
+            self._host = config.get("host")
+            if self._host:
+                if not self._host.startswith('http'):
+                    self._host = "http://" + self._host
+                if self._host.endswith('/'):
+                    self._host = self._host.rstrip('/')
+            self._api_key = config.get("api_key")
+            self._password = config.get("password")
+            self._enabled = config.get("enabled")
+            self._proxy = config.get("proxy")
+            self._onlyonce = config.get("onlyonce")
             self._cron = config.get("cron") or "0 0 */24 * *"
-            self._onlyonce = config.get("onlyonce", False)
 
-        # Stop any existing scheduler
+        # 停止现有任务
         self.stop_service()
 
-        # Initialize scheduler for periodic indexer updates
+        # 启动定时任务 & 立即运行一次
         self._scheduler = BackgroundScheduler(timezone=settings.TZ)
-
         if self._cron:
-            logger.info(f"[{self.plugin_name}] 索引更新服务启动，周期: {self._cron}")
-            self._scheduler.add_job(
-                self._refresh_indexers,
-                CronTrigger.from_crontab(self._cron)
-            )
+            logger.info(f"【{self.plugin_name}】索引更新服务启动，周期：{self._cron}")
+            self._scheduler.add_job(self.get_status, CronTrigger.from_crontab(self._cron))
 
         if self._onlyonce:
-            logger.info(f"[{self.plugin_name}] 立即执行一次索引器同步")
-            self._scheduler.add_job(
-                self._refresh_indexers,
-                'date',
-                run_date=datetime.now(tz=pytz.timezone(settings.TZ)) + timedelta(seconds=3)
-            )
+            logger.info(f"【{self.plugin_name}】开始获取索引器状态")
+            self._scheduler.add_job(self.get_status, 'date',
+                                    run_date=datetime.now(tz=pytz.timezone(settings.TZ)) + timedelta(seconds=3))
+            # 关闭一次性开关
             self._onlyonce = False
-            self._save_config()
+            self.__update_config()
 
         if self._cron or self._onlyonce:
+            # 启动服务
             self._scheduler.print_jobs()
             self._scheduler.start()
 
-        # Initial indexer load and register
+        # 获取索引器并注册
         if not self._indexers:
-            self._refresh_indexers()
+            self.get_status()
 
-        # Register indexers with MoviePilot (always, regardless of _enabled)
-        self._register_indexers()
-
-    def _normalize_host(self, host: str) -> str:
-        """Normalize the host URL format."""
-        if not host:
-            return ""
-        if not host.startswith(('http://', 'https://')):
-            host = f"http://{host}"
-        return host.rstrip('/')
-
-    def _save_config(self) -> None:
-        """Save current configuration."""
-        self.update_config({
-            "enabled": self._enabled,
-            "host": self._host,
-            "api_key": self._api_key,
-            "password": self._password,
-            "proxy": self._proxy,
-            "cron": self._cron,
-            "onlyonce": False,
-        })
-
-    def _refresh_indexers(self) -> bool:
-        """
-        Fetch available indexers from Jackett.
-
-        Returns:
-            True if indexers were successfully retrieved
-        """
-        if not self._api_key or not self._host:
-            logger.warning(f"[{self.plugin_name}] 未配置Jackett地址或API Key")
-            return False
-
-        self._indexers = self._fetch_indexers()
-        self._register_indexers()
-        return len(self._indexers) > 0
-
-    def _fetch_indexers(self) -> List[Dict[str, Any]]:
-        """
-        Fetch indexer list from Jackett API.
-
-        Returns:
-            List of indexer configurations
-        """
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": settings.USER_AGENT,
-            "Accept": "application/json"
-        }
-
-        # Jackett may require password authentication
-        cookie = self._authenticate()
-
-        url = f"{self._host}/api/v2.0/indexers?configured=true"
-
-        try:
-            response = RequestUtils(
-                headers=headers,
-                cookies=cookie
-            ).get_res(
-                url,
-                proxies=settings.PROXY if self._proxy else None
-            )
-
-            if not response or not response.json():
-                logger.warning(f"[{self.plugin_name}] 获取索引器列表无响应")
-                return []
-
-            indexers_raw = response.json()
-            indexers = []
-
-            for item in indexers_raw:
-                indexer_id = item.get("id")
-                indexer_name = item.get("name")
-                if not indexer_id or not indexer_name:
-                    continue
-
-                indexers.append({
-                    "id": f"Jackett-{indexer_name}",
-                    "name": f"Jackett-{indexer_name}",
-                    "url": f"{self._host}/api/v2.0/indexers/{indexer_id}/results/torznab/",
-                    "domain": f"{self.DOMAIN_PREFIX}.{indexer_id}",
-                    "public": True,
-                    "proxy": self._proxy,
-                    "indexer_id": indexer_id,
-                })
-
-            logger.info(f"[{self.plugin_name}] 获取到 {len(indexers)} 个索引器")
-            return indexers
-
-        except Exception as e:
-            logger.error(f"[{self.plugin_name}] 获取索引器列表失败: {e}")
-            return []
-
-    def _authenticate(self) -> Optional[dict]:
-        """
-        Authenticate with Jackett if password is configured.
-
-        Returns:
-            Cookie dictionary if authentication successful, None otherwise
-        """
-        if not self._password:
-            return None
-
-        headers = {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": settings.USER_AGENT,
-        }
-
-        session = requests.session()
-        login_url = f"{self._host}/UI/Dashboard"
-        login_data = {"password": self._password}
-
-        try:
-            RequestUtils(headers=headers, session=session).post_res(
-                url=login_url,
-                data=login_data,
-                params=login_data,
-                proxies=settings.PROXY if self._proxy else None
-            )
-
-            if session.cookies:
-                return session.cookies.get_dict()
-
-        except Exception as e:
-            logger.warning(f"[{self.plugin_name}] 认证失败: {e}")
-
-        return None
-
-    def _register_indexers(self) -> None:
-        """Register fetched indexers with MoviePilot's site system."""
         for indexer in self._indexers:
             domain = indexer.get("domain", "")
-            if not self._sites_helper.get_indexer(domain):
-                self._sites_helper.add_indexer(domain, copy.deepcopy(indexer))
+            site_info = self.sites_helper.get_indexer(domain)
+            if not site_info:
+                new_indexer = copy.deepcopy(indexer)
+                self.sites_helper.add_indexer(domain, new_indexer)
+
+    def get_status(self):
+        """
+        检查连通性
+        """
+        if not self._api_key or not self._host:
+            return False
+        self._indexers = self.get_indexers()
+        return True if isinstance(self._indexers, list) and len(self._indexers) > 0 else False
 
     def get_state(self) -> bool:
-        """Return plugin enabled state."""
         return self._enabled
 
-    def stop_service(self) -> None:
-        """Stop the scheduler and cleanup resources."""
+    def stop_service(self):
+        """
+        退出插件
+        """
         try:
             if self._scheduler:
                 self._scheduler.remove_all_jobs()
@@ -265,61 +133,122 @@ class JackettIndexer(_PluginBase):
                     self._scheduler.shutdown()
                 self._scheduler = None
         except Exception as e:
-            logger.error(f"[{self.plugin_name}] 停止服务失败: {e}")
+            logger.error(f"【{self.plugin_name}】停止插件错误: {str(e)}")
+
+    def __update_config(self):
+        """
+        更新插件配置
+        """
+        self.update_config({
+            "enabled": self._enabled,
+            "onlyonce": False,
+            "cron": self._cron,
+            "host": self._host,
+            "api_key": self._api_key,
+            "password": self._password,
+            "proxy": self._proxy,
+        })
 
     def get_module(self) -> Dict[str, Any]:
         """
-        Register search method to intercept MoviePilot searches.
-
-        This is the key integration point that allows this plugin
-        to handle search requests for Jackett indexers.
+        获取插件模块声明
         """
         return {
             "search_torrents": self.search_torrents,
         }
 
-    def search_torrents(
-        self,
-        site: dict,
-        keyword: str,
-        mtype: Optional[MediaType] = None,
-        page: Optional[int] = 0
-    ) -> List[TorrentInfo]:
+    def get_api(self) -> List[Dict[str, Any]]:
+        pass
+
+    def get_indexers(self):
         """
-        Search for torrents using Jackett Torznab API.
+        获取配置的 Jackett Indexer 信息
+        """
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "User-Agent": settings.USER_AGENT,
+            "X-Api-Key": self._api_key,
+            "Accept": "application/json, text/javascript, */*; q=0.01"
+        }
 
-        Args:
-            site: Site configuration from MoviePilot
-            keyword: Search keyword
-            mtype: Media type (Movie/TV)
-            page: Page number for pagination
+        cookie = None
+        session = requests.session()
 
-        Returns:
-            List of TorrentInfo objects matching the search
+        try:
+            # Jackett 密码认证
+            if self._password:
+                login_url = f"{self._host}/UI/Dashboard"
+                login_data = {"password": self._password}
+                login_params = {"password": self._password}
+                login_res = RequestUtils(headers=headers, session=session).post_res(
+                    url=login_url,
+                    data=login_data,
+                    params=login_params,
+                    proxies=settings.PROXY if self._proxy else None
+                )
+                if login_res and session.cookies:
+                    cookie = session.cookies.get_dict()
+                else:
+                    logger.warning(f"【{self.plugin_name}】Jackett 登录失败")
+
+            indexer_query_url = f"{self._host}/api/v2.0/indexers?configured=true"
+            ret = RequestUtils(headers=headers, cookies=cookie).get_res(
+                indexer_query_url,
+                proxies=settings.PROXY if self._proxy else None
+            )
+
+            if not ret or not ret.json():
+                logger.warning(f"【{self.plugin_name}】未获取到任何 indexer 配置")
+                return []
+
+            raw_indexers = ret.json()
+            indexers = []
+            for v in raw_indexers:
+                indexer_id = v.get("id")
+                indexer_name = v.get("name")
+                if not indexer_id or not indexer_name:
+                    continue
+
+                indexers.append({
+                    "id": f'{self.plugin_name}-{indexer_name}',
+                    "name": f'{self.plugin_name}-{indexer_name}',
+                    "url": f'{self._host}/api/v2.0/indexers/{indexer_id}/results/torznab/',
+                    "domain": f'{self.jackett_domain}.{indexer_id}',
+                    "public": True,
+                    "proxy": self._proxy,
+                })
+
+            logger.info(f"【{self.plugin_name}】获取到 {len(indexers)} 个索引器")
+            return indexers
+
+        except Exception as e:
+            logger.error(f"【{self.plugin_name}】获取 Jackett indexers 失败：{str(e)}")
+            return []
+
+    def search_torrents(self, site: dict, keyword: str, mtype: Optional[MediaType] = None,
+                        page: Optional[int] = 0) -> List[TorrentInfo]:
+        """
+        使用 Jackett Torznab API 检索种子
         """
         results = []
-
         if not site or not keyword:
             return results
 
-        # Only handle sites registered by this plugin
-        site_name = site.get("name", "")
-        if not site_name.startswith("Jackett-"):
+        # 检查是否是本插件注册的站点
+        if site.get("name", "").split("-")[0] != self.plugin_name:
             return results
 
-        # Extract indexer ID from domain
         domain = StringUtils.get_url_domain(site.get("domain", ""))
         if not domain:
-            logger.warning(f"[{self.plugin_name}] 无法解析站点域名")
+            logger.warning(f"【{self.plugin_name}】站点域名无法解析")
             return results
 
-        indexer_id = domain.split(".")[-1]
-        categories = self._get_categories(mtype)
+        indexer_name = domain.split(".")[-1]
+        categories = self.get_cat(mtype)
 
         try:
-            logger.info(f"[{self.plugin_name}] 开始搜索: {site_name}, 关键词: {keyword}")
+            logger.info(f"【{self.plugin_name}】开始检索 Indexer：{site.get('name')}，关键词：{keyword}")
 
-            # Build Torznab query parameters
             params = {
                 "apikey": self._api_key,
                 "t": "search",
@@ -327,147 +256,107 @@ class JackettIndexer(_PluginBase):
                 "cat": ",".join(map(str, categories))
             }
             query_string = urlencode(params, quote_via=quote_plus)
-            api_url = f"{self._host}/api/v2.0/indexers/{indexer_id}/results/torznab/?{query_string}"
+            api_url = f"{self._host}/api/v2.0/indexers/{indexer_name}/results/torznab/?{query_string}"
 
-            # Parse Torznab XML response
-            results = self._parse_torznab_response(api_url, site_name)
+            result_array = self.__parse_torznab_xml(api_url, site.get("name"))
 
-            if results:
-                logger.info(f"[{self.plugin_name}] {site_name} 返回 {len(results)} 条结果")
+            if result_array:
+                logger.info(f"【{self.plugin_name}】{site.get('name')} 返回 {len(result_array)} 条结果")
+                results.extend(result_array)
             else:
-                logger.info(f"[{self.plugin_name}] {site_name} 未找到匹配结果")
+                logger.info(f"【{self.plugin_name}】{site.get('name')} 未检索到数据")
 
         except Exception as e:
-            logger.error(f"[{self.plugin_name}] 搜索出错: {e}\n{traceback.format_exc()}")
+            logger.error(f"【{self.plugin_name}】检索出错：{str(e)}")
 
         return results
 
-    def _parse_torznab_response(self, url: str, site_name: str) -> List[TorrentInfo]:
-        """
-        Parse Torznab XML response into TorrentInfo objects.
-
-        Args:
-            url: Torznab API URL
-            site_name: Name of the site for attribution
-
-        Returns:
-            List of parsed TorrentInfo objects
-        """
-        torrents = []
-
-        try:
-            response = RequestUtils(timeout=60).get_res(
-                url,
-                proxies=settings.PROXY if self._proxy else None
-            )
-
-            if not response or not response.text:
-                return []
-
-            xml_text = response.text
-
-            # Parse XML
-            dom_tree = xml.dom.minidom.parseString(xml_text)
-            root_node = dom_tree.documentElement
-            items = root_node.getElementsByTagName("item")
-
-            for item in items:
-                try:
-                    # Extract basic fields
-                    title = DomUtils.tag_value(item, "title", default="")
-                    if not title:
-                        continue
-
-                    enclosure = DomUtils.tag_value(item, "enclosure", "url", default="")
-                    if not enclosure:
-                        continue
-
-                    description = DomUtils.tag_value(item, "description", default="")
-                    size = DomUtils.tag_value(item, "size", default=0)
-                    page_url = DomUtils.tag_value(item, "comments", default="")
-
-                    pubdate = DomUtils.tag_value(item, "pubDate", default="")
-                    if pubdate:
-                        pubdate = StringUtils.unify_datetime_str(pubdate)
-
-                    # Extract torznab attributes
-                    seeders = 0
-                    peers = 0
-                    imdbid = ""
-                    downloadvolumefactor = 1.0
-                    uploadvolumefactor = 1.0
-
-                    torznab_attrs = item.getElementsByTagName("torznab:attr")
-                    for attr in torznab_attrs:
-                        name = attr.getAttribute('name')
-                        value = attr.getAttribute('value')
-
-                        if name == "seeders":
-                            seeders = int(value) if value else 0
-                        elif name == "peers":
-                            peers = int(value) if value else 0
-                        elif name == "downloadvolumefactor":
-                            downloadvolumefactor = float(value) if value else 1.0
-                        elif name == "uploadvolumefactor":
-                            uploadvolumefactor = float(value) if value else 1.0
-                        elif name == "imdbid":
-                            imdbid = value
-
-                    # Create TorrentInfo object
-                    torrent = TorrentInfo(
-                        title=title,
-                        enclosure=enclosure,
-                        description=description,
-                        size=size,
-                        seeders=seeders,
-                        peers=peers,
-                        page_url=page_url,
-                        pubdate=pubdate,
-                        imdbid=imdbid,
-                        site_name=site_name,
-                        downloadvolumefactor=downloadvolumefactor,
-                        uploadvolumefactor=uploadvolumefactor,
-                    )
-                    torrents.append(torrent)
-
-                except Exception as e:
-                    logger.debug(f"[{self.plugin_name}] 解析单条结果失败: {e}")
-                    continue
-
-        except Exception as e:
-            logger.error(f"[{self.plugin_name}] 解析Torznab响应失败: {e}")
-
-        return torrents
-
     @staticmethod
-    def _get_categories(mtype: Optional[MediaType]) -> List[int]:
-        """
-        Map MediaType to Torznab category IDs.
-
-        Args:
-            mtype: MoviePilot media type
-
-        Returns:
-            List of category IDs (2000=Movies, 5000=TV)
-        """
+    def get_cat(mtype: Optional[MediaType] = None):
         if not mtype:
             return [2000, 5000]
         elif mtype == MediaType.MOVIE:
             return [2000]
         elif mtype == MediaType.TV:
             return [5000]
-        return [2000, 5000]
+        else:
+            return [2000, 5000]
 
-    def get_api(self) -> List[Dict[str, Any]]:
-        """Return empty API list - no custom endpoints needed."""
-        return []
+    def __parse_torznab_xml(self, url, site_name) -> List[TorrentInfo]:
+        """
+        解析 torznab XML 响应
+        """
+        if not url:
+            return []
+        try:
+            ret = RequestUtils(timeout=60).get_res(url,
+                                                   proxies=settings.PROXY if self._proxy else None)
+        except Exception as e:
+            logger.error(str(e))
+            return []
+        if not ret or not ret.text:
+            return []
+
+        xmls = ret.text
+        torrents = []
+        try:
+            dom_tree = xml.dom.minidom.parseString(xmls)
+            root_node = dom_tree.documentElement
+            items = root_node.getElementsByTagName("item")
+            for item in items:
+                try:
+                    title = DomUtils.tag_value(item, "title", default="")
+                    if not title:
+                        continue
+                    enclosure = DomUtils.tag_value(item, "enclosure", "url", default="")
+                    if not enclosure:
+                        continue
+                    description = DomUtils.tag_value(item, "description", default="")
+                    size = DomUtils.tag_value(item, "size", default=0)
+                    page_url = DomUtils.tag_value(item, "comments", default="")
+                    pubdate = DomUtils.tag_value(item, "pubDate", default="")
+                    if pubdate:
+                        pubdate = StringUtils.unify_datetime_str(pubdate)
+
+                    seeders = 0
+                    peers = 0
+                    imdbid = ""
+
+                    torznab_attrs = item.getElementsByTagName("torznab:attr")
+                    for torznab_attr in torznab_attrs:
+                        name = torznab_attr.getAttribute('name')
+                        value = torznab_attr.getAttribute('value')
+                        if name == "seeders":
+                            seeders = int(value) if value else 0
+                        if name == "peers":
+                            peers = int(value) if value else 0
+                        if name == "imdbid":
+                            imdbid = value
+
+                    tmp_dict = TorrentInfo(
+                        title=title,
+                        enclosure=enclosure,
+                        description=description,
+                        size=size,
+                        seeders=seeders,
+                        peers=peers,
+                        site_name=site_name,
+                        page_url=page_url,
+                        pubdate=pubdate,
+                        imdbid=imdbid
+                    )
+                    torrents.append(tmp_dict)
+                except Exception as e:
+                    logger.error(str(e))
+                    continue
+        except Exception as e:
+            logger.error(f"解析错误：{traceback.format_exc()}")
+
+        return torrents
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
-        Build the plugin configuration form UI.
-
-        Returns:
-            Tuple of (form structure, default values)
+        拼装插件配置页面
         """
         return [
             {
@@ -494,7 +383,7 @@ class JackettIndexer(_PluginBase):
                                     'component': 'VSwitch',
                                     'props': {
                                         'model': 'proxy',
-                                        'label': '使用代理',
+                                        'label': '使用代理服务器',
                                     }
                                 }]
                             },
@@ -505,7 +394,7 @@ class JackettIndexer(_PluginBase):
                                     'component': 'VSwitch',
                                     'props': {
                                         'model': 'onlyonce',
-                                        'label': '立即同步一次',
+                                        'label': '立即运行一次',
                                     }
                                 }]
                             },
@@ -523,7 +412,7 @@ class JackettIndexer(_PluginBase):
                                         'model': 'host',
                                         'label': 'Jackett地址',
                                         'placeholder': 'http://127.0.0.1:9117',
-                                        'hint': 'Jackett访问地址，如: http://192.168.1.100:9117'
+                                        'hint': 'Jackett访问地址和端口'
                                     }
                                 }]
                             },
@@ -534,9 +423,9 @@ class JackettIndexer(_PluginBase):
                                     'component': 'VTextField',
                                     'props': {
                                         'model': 'api_key',
-                                        'label': 'API Key',
+                                        'label': 'Api Key',
                                         'placeholder': '',
-                                        'hint': '在Jackett管理界面右上角复制API Key'
+                                        'hint': 'Jackett管理界面右上角复制API Key'
                                     }
                                 }]
                             },
@@ -552,7 +441,7 @@ class JackettIndexer(_PluginBase):
                                     'component': 'VTextField',
                                     'props': {
                                         'model': 'password',
-                                        'label': '管理密码',
+                                        'label': '密码',
                                         'placeholder': '',
                                         'hint': 'Jackett管理密码（如已设置）',
                                         'type': 'password'
@@ -566,9 +455,9 @@ class JackettIndexer(_PluginBase):
                                     'component': 'VTextField',
                                     'props': {
                                         'model': 'cron',
-                                        'label': '索引器同步周期',
+                                        'label': '更新周期',
                                         'placeholder': '0 0 */24 * *',
-                                        'hint': '定期从Jackett同步索引器列表，5位cron表达式'
+                                        'hint': '索引列表更新周期，5位cron表达式'
                                     }
                                 }]
                             },
@@ -586,11 +475,10 @@ class JackettIndexer(_PluginBase):
                                         'type': 'success',
                                         'variant': 'tonal',
                                         'text': '使用说明：'
-                                                '1. 在Jackett中添加并配置好索引器；'
-                                                '2. 填写Jackett地址、API Key和管理密码（如已设置）；'
-                                                '3. 启用插件并点击"立即同步一次"获取索引器列表；'
-                                                '4. 前往 设置->搜索->索引站点 勾选需要启用的Jackett索引器；'
-                                                '5. 搜索时将自动使用已启用的Jackett索引器'
+                                                '1. 填写Jackett地址和API Key；'
+                                                '2. 启用插件并点击"立即运行一次"；'
+                                                '3. 前往 设置->搜索->索引站点 勾选 JackettIndexer 开头的索引器；'
+                                                '4. 搜索时将自动调用Jackett'
                                     }
                                 }]
                             }
@@ -607,7 +495,7 @@ class JackettIndexer(_PluginBase):
                                     'props': {
                                         'type': 'warning',
                                         'variant': 'tonal',
-                                        'text': '注意：无需在"站点管理"中手动添加站点！插件会自动注册索引器到搜索系统。'
+                                        'text': '注意：无需在"站点管理"中添加站点！索引器会自动注册到搜索系统。'
                                     }
                                 }]
                             }
@@ -622,19 +510,23 @@ class JackettIndexer(_PluginBase):
             "password": "",
             "proxy": False,
             "cron": "0 0 */24 * *",
-            "onlyonce": False,
+            "onlyonce": False
         }
+
+    def _ensure_sites_loaded(self) -> bool:
+        """
+        确保索引器已加载
+        """
+        if isinstance(self._indexers, list) and len(self._indexers) > 0:
+            return True
+        self.get_status()
+        return isinstance(self._indexers, list) and len(self._indexers) > 0
 
     def get_page(self) -> List[dict]:
         """
-        Build the plugin data display page.
-
-        Shows all registered Jackett indexers in a table.
+        拼装插件详情页面
         """
-        if not self._indexers:
-            self._refresh_indexers()
-
-        if not self._indexers:
+        if not self._ensure_sites_loaded():
             return [{
                 'component': 'VRow',
                 'content': [{
@@ -651,14 +543,13 @@ class JackettIndexer(_PluginBase):
                 }]
             }]
 
-        table_rows = []
-        for indexer in self._indexers:
-            table_rows.append({
+        items = []
+        for site in self._indexers:
+            items.append({
                 'component': 'tr',
                 'content': [
-                    {'component': 'td', 'text': indexer.get("name")},
-                    {'component': 'td', 'text': f"https://{indexer.get('domain')}"},
-                    {'component': 'td', 'text': str(indexer.get("indexer_id"))},
+                    {'component': 'td', 'text': site.get("name")},
+                    {'component': 'td', 'text': site.get("domain")},
                 ]
             })
 
@@ -678,14 +569,13 @@ class JackettIndexer(_PluginBase):
                                     'component': 'tr',
                                     'content': [
                                         {'component': 'th', 'props': {'class': 'text-start ps-4'}, 'text': '索引器名称'},
-                                        {'component': 'th', 'props': {'class': 'text-start ps-4'}, 'text': '站点域名'},
-                                        {'component': 'th', 'props': {'class': 'text-start ps-4'}, 'text': '索引器ID'},
+                                        {'component': 'th', 'props': {'class': 'text-start ps-4'}, 'text': '域名标识'},
                                     ]
                                 }]
                             },
                             {
                                 'component': 'tbody',
-                                'content': table_rows
+                                'content': items
                             }
                         ]
                     }]
