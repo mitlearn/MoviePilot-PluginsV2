@@ -2,6 +2,11 @@
 """
 MoviePilot 插件：ProwlarrIndexer
 通过 Prowlarr API 搜索资源，将结果以 TorrentInfo 列表返回给 MoviePilot。
+
+API 参考：
+  - 搜索：GET /api/v1/search?query=&indexerIds=&categories=&type=search&limit=&offset=
+  - 索引器统计：GET /api/v1/indexerstats
+  - 认证：Header X-Api-Key 或 URL 参数 apikey
 """
 import copy
 import time
@@ -28,20 +33,26 @@ class ProwlarrIndexer(_PluginBase):
     """
     Prowlarr 索引器插件
     通过 get_module() 劫持 search_torrents 方法，将 Prowlarr 搜索结果注入 MoviePilot 搜索链。
+
+    工作流程：
+    1. 初始化时通过 /api/v1/indexerstats 获取 Prowlarr 已配置的索引器列表
+    2. 将每个索引器注册为 MoviePilot 的站点（通过 SitesHelper.add_indexer）
+    3. 用户搜索时，MoviePilot 调用 search_torrents → 本插件拦截匹配的站点请求
+    4. 通过 /api/v1/search 向 Prowlarr 发起搜索，解析 JSON 结果并返回 TorrentInfo 列表
     """
 
     # ==================== 插件元数据 ====================
     plugin_name = "ProwlarrIndexer"
     plugin_desc = "聚合索引：通过 Prowlarr 检索站点资源"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "1.1"
+    plugin_version = "2.0"
     plugin_author = "prowlarr"
     author_url = "https://github.com/prowlarr"
     plugin_config_prefix = "prowlarr_indexer_"
     plugin_order = 16
     auth_level = 1
 
-    # 域名标识前缀
+    # 域名标识前缀，格式：prowlarr_indexer.<indexer_id>
     _domain_prefix = "prowlarr_indexer"
 
     # ==================== 生命周期 ====================
@@ -77,6 +88,10 @@ class ProwlarrIndexer(_PluginBase):
         self.stop_service()
 
         if not self._enabled:
+            return
+
+        if not self._host or not self._api_key:
+            logger.warning(f"[{self.plugin_name}] Prowlarr 地址或 API Key 未配置，插件不会生效")
             return
 
         self._scheduler = BackgroundScheduler(timezone=settings.TZ)
@@ -118,6 +133,11 @@ class ProwlarrIndexer(_PluginBase):
     # ==================== 模块劫持 ====================
 
     def get_module(self) -> Dict[str, Any]:
+        """
+        声明劫持 search_torrents 方法。
+        MoviePilot 在搜索时，对于每个已注册站点依次调用此方法，
+        如果站点名称匹配本插件，则由本插件处理搜索逻辑。
+        """
         return {"search_torrents": self.search_torrents}
 
     # ==================== 搜索逻辑 ====================
@@ -131,7 +151,14 @@ class ProwlarrIndexer(_PluginBase):
         page: Optional[int] = 0,
     ) -> List[TorrentInfo]:
         """
-        MoviePilot 搜索链回调。仅处理本插件注册的站点。
+        MoviePilot 搜索链回调。
+
+        :param site: 站点信息字典，包含 name, domain 等
+        :param keyword: 搜索关键词
+        :param mtype: 媒体类型（电影/电视剧）
+        :param cat: 分类（当前未使用，由 mtype 决定）
+        :param page: 页码，从 0 开始
+        :return: TorrentInfo 列表
         """
         if not site or not keyword:
             return []
@@ -150,6 +177,7 @@ class ProwlarrIndexer(_PluginBase):
         headers = self._build_headers()
         categories = self._get_categories(mtype)
 
+        # Prowlarr /api/v1/search 支持多个 categories 参数
         params = [
             ("query", keyword),
             ("indexerIds", indexer_id),
@@ -160,7 +188,7 @@ class ProwlarrIndexer(_PluginBase):
 
         query_string = urlencode(params, quote_via=quote_plus)
         api_url = f"{self._host}/api/v1/search?{query_string}"
-        logger.info(f"[{self.plugin_name}] 请求 URL: {api_url}")
+        logger.debug(f"[{self.plugin_name}] 请求 URL: {api_url}")
 
         response = self._request_with_retry(api_url, headers=headers)
         if not response:
@@ -211,6 +239,10 @@ class ProwlarrIndexer(_PluginBase):
     # ==================== 索引器管理 ====================
 
     def _refresh_indexers(self):
+        """
+        从 Prowlarr /api/v1/indexerstats 获取已配置的索引器列表。
+        注意：需要先在 Prowlarr 中执行过至少一次搜索，该接口才会返回索引器统计。
+        """
         if not self._api_key or not self._host:
             logger.warning(f"[{self.plugin_name}] 地址或 API Key 未配置")
             return
@@ -253,6 +285,7 @@ class ProwlarrIndexer(_PluginBase):
         self._register_indexers()
 
     def _register_indexers(self):
+        """将索引器注册到 MoviePilot 站点系统"""
         if not self._sites_helper:
             return
         for indexer in self._indexers:
@@ -273,15 +306,15 @@ class ProwlarrIndexer(_PluginBase):
         }
 
     def _request_with_retry(self, url: str, headers: Optional[dict] = None) -> Optional[requests.Response]:
+        """带指数退避重试的 HTTP GET 请求"""
         proxies = settings.PROXY if self._proxy else None
         last_error = None
 
         for attempt in range(1, self._max_retries + 1):
             try:
-                logger.info(f"[{self.plugin_name}] HTTP GET (第{attempt}次): {url}")
+                logger.debug(f"[{self.plugin_name}] HTTP GET (第{attempt}次): {url}")
                 ret = RequestUtils(headers=headers, timeout=self._timeout).get_res(url, proxies=proxies)
                 if ret is not None:
-                    logger.info(f"[{self.plugin_name}] 状态码: {ret.status_code}")
                     if ret.status_code == 200:
                         return ret
                     logger.warning(f"[{self.plugin_name}] HTTP {ret.status_code} (第{attempt}次)")
@@ -293,7 +326,7 @@ class ProwlarrIndexer(_PluginBase):
 
             if attempt < self._max_retries:
                 wait = 2 ** attempt
-                logger.info(f"[{self.plugin_name}] {wait}秒后重试...")
+                logger.debug(f"[{self.plugin_name}] {wait}秒后重试...")
                 time.sleep(wait)
 
         logger.error(f"[{self.plugin_name}] 请求失败，已重试 {self._max_retries} 次: {url}"
@@ -313,6 +346,10 @@ class ProwlarrIndexer(_PluginBase):
 
     @staticmethod
     def _get_categories(mtype: Optional[MediaType] = None) -> list:
+        """
+        根据媒体类型返回 Newznab 标准分类 ID。
+        2000 = Movies, 5000 = TV
+        """
         if not mtype:
             return [2000, 5000]
         if mtype == MediaType.MOVIE:
@@ -322,7 +359,7 @@ class ProwlarrIndexer(_PluginBase):
         return [2000, 5000]
 
     def _extract_indexer_id(self, site: dict) -> str:
-        """域名格式: prowlarr_indexer.<indexer_id>"""
+        """从域名格式 prowlarr_indexer.<indexer_id> 中提取 ID"""
         domain = site.get("domain", "")
         if not domain:
             return ""
@@ -331,6 +368,7 @@ class ProwlarrIndexer(_PluginBase):
 
     @staticmethod
     def _extract_imdb(entry: dict) -> str:
+        """从 Prowlarr 结果中提取 IMDB ID（格式：tt0000000）"""
         imdb_id = entry.get("imdbId")
         if imdb_id and isinstance(imdb_id, int) and imdb_id > 0:
             return f"tt{imdb_id:07d}"
@@ -338,6 +376,7 @@ class ProwlarrIndexer(_PluginBase):
 
     @staticmethod
     def _parse_download_factor(entry: dict) -> Optional[float]:
+        """解析 indexerFlags 中的下载折扣信息"""
         flags = entry.get("indexerFlags") or []
         if isinstance(flags, list):
             for flag in flags:
@@ -350,6 +389,7 @@ class ProwlarrIndexer(_PluginBase):
 
     @staticmethod
     def _parse_upload_factor(entry: dict) -> Optional[float]:
+        """解析 indexerFlags 中的上传倍率信息"""
         flags = entry.get("indexerFlags") or []
         if isinstance(flags, list):
             for flag in flags:

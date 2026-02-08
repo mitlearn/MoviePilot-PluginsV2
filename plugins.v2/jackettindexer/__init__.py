@@ -2,6 +2,11 @@
 """
 MoviePilot 插件：JackettIndexer
 通过 Jackett Torznab API 搜索资源，将结果以 TorrentInfo 列表返回给 MoviePilot。
+
+API 参考：
+  - Torznab 搜索：GET /api/v2.0/indexers/{id}/results/torznab/?apikey=&t=search&q=&cat=
+  - 索引器列表：GET /api/v2.0/indexers?configured=true
+  - 认证：URL 参数 apikey（Torznab）或 Header X-Api-Key（管理 API）
 """
 import copy
 import time
@@ -30,20 +35,26 @@ class JackettIndexer(_PluginBase):
     """
     Jackett 索引器插件
     通过 get_module() 劫持 search_torrents 方法，将 Jackett Torznab 搜索结果注入 MoviePilot 搜索链。
+
+    工作流程：
+    1. 初始化时通过 /api/v2.0/indexers?configured=true 获取 Jackett 已配置的索引器列表
+    2. 将每个索引器注册为 MoviePilot 的站点（通过 SitesHelper.add_indexer）
+    3. 用户搜索时，MoviePilot 调用 search_torrents → 本插件拦截匹配的站点请求
+    4. 通过 Torznab 接口向 Jackett 发起搜索，解析 XML 结果并返回 TorrentInfo 列表
     """
 
     # ==================== 插件元数据 ====================
     plugin_name = "JackettIndexer"
     plugin_desc = "聚合索引：通过 Jackett 检索站点资源"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "1.1"
+    plugin_version = "2.0"
     plugin_author = "prowlarr"
     author_url = "https://github.com/prowlarr"
     plugin_config_prefix = "jackett_indexer_"
     plugin_order = 15
     auth_level = 1
 
-    # 域名标识前缀
+    # 域名标识前缀，格式：jackett_indexer.<indexer_id>
     _domain_prefix = "jackett_indexer"
 
     # ==================== 生命周期 ====================
@@ -81,6 +92,10 @@ class JackettIndexer(_PluginBase):
         self.stop_service()
 
         if not self._enabled:
+            return
+
+        if not self._host or not self._api_key:
+            logger.warning(f"[{self.plugin_name}] Jackett 地址或 API Key 未配置，插件不会生效")
             return
 
         self._scheduler = BackgroundScheduler(timezone=settings.TZ)
@@ -122,6 +137,11 @@ class JackettIndexer(_PluginBase):
     # ==================== 模块劫持 ====================
 
     def get_module(self) -> Dict[str, Any]:
+        """
+        声明劫持 search_torrents 方法。
+        MoviePilot 在搜索时，对于每个已注册站点依次调用此方法，
+        如果站点名称匹配本插件，则由本插件处理搜索逻辑。
+        """
         return {"search_torrents": self.search_torrents}
 
     # ==================== 搜索逻辑 ====================
@@ -135,7 +155,14 @@ class JackettIndexer(_PluginBase):
         page: Optional[int] = 0,
     ) -> List[TorrentInfo]:
         """
-        MoviePilot 搜索链回调。仅处理本插件注册的站点。
+        MoviePilot 搜索链回调。
+
+        :param site: 站点信息字典，包含 name, domain 等
+        :param keyword: 搜索关键词
+        :param mtype: 媒体类型（电影/电视剧）
+        :param cat: 分类（当前未使用，由 mtype 决定）
+        :param page: 页码
+        :return: TorrentInfo 列表
         """
         if not site or not keyword:
             return []
@@ -143,7 +170,7 @@ class JackettIndexer(_PluginBase):
         if not site_name.startswith(self.plugin_name):
             return []
 
-        logger.debug(f"[{self.plugin_name}] 搜索 -> 站点: {site_name}, "
+        logger.info(f"[{self.plugin_name}] 搜索 -> 站点: {site_name}, "
                      f"关键词: {keyword}, 类型: {mtype}, 页码: {page}")
 
         indexer_id = self._extract_indexer_id(site)
@@ -152,6 +179,7 @@ class JackettIndexer(_PluginBase):
             return []
 
         categories = self._get_categories(mtype)
+        # Jackett Torznab 使用 URL 参数认证
         params = {
             "apikey": self._api_key,
             "t": "search",
@@ -170,10 +198,25 @@ class JackettIndexer(_PluginBase):
     # ==================== Torznab XML 解析 ====================
 
     def _parse_torznab_xml(self, url: str, site_name: str = "") -> List[TorrentInfo]:
+        """
+        从 Torznab XML 响应中解析种子信息。
+
+        Torznab XML 结构：
+        <rss><channel>
+          <item>
+            <title>...</title>
+            <enclosure url="..." />
+            <size>...</size>
+            <torznab:attr name="seeders" value="..." />
+            ...
+          </item>
+        </channel></rss>
+        """
         if not url:
             return []
 
-        response = self._request_with_retry(url)
+        headers = self._build_search_headers()
+        response = self._request_with_retry(url, headers=headers)
         if not response or not response.text:
             return []
 
@@ -252,6 +295,7 @@ class JackettIndexer(_PluginBase):
     # ==================== 索引器管理 ====================
 
     def _refresh_indexers(self):
+        """从 Jackett /api/v2.0/indexers?configured=true 获取已配置的索引器列表"""
         if not self._api_key or not self._host:
             logger.warning(f"[{self.plugin_name}] 地址或 API Key 未配置")
             return
@@ -303,6 +347,7 @@ class JackettIndexer(_PluginBase):
         self._register_indexers()
 
     def _register_indexers(self):
+        """将索引器注册到 MoviePilot 站点系统"""
         if not self._sites_helper:
             return
         for indexer in self._indexers:
@@ -313,6 +358,7 @@ class JackettIndexer(_PluginBase):
             logger.debug(f"[{self.plugin_name}] 注册索引器: {indexer.get('name')} -> {domain}")
 
     def _jackett_login(self, headers: dict) -> Optional[dict]:
+        """Jackett 管理密码认证，获取 session cookie"""
         if not self._password:
             return None
         session = requests.session()
@@ -332,6 +378,7 @@ class JackettIndexer(_PluginBase):
     # ==================== HTTP 工具 ====================
 
     def _build_headers(self) -> dict:
+        """管理 API 请求头（含 X-Api-Key）"""
         return {
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
             "User-Agent": settings.USER_AGENT,
@@ -339,7 +386,15 @@ class JackettIndexer(_PluginBase):
             "Accept": "application/json, text/javascript, */*; q=0.01",
         }
 
+    def _build_search_headers(self) -> dict:
+        """Torznab 搜索请求头（认证通过 URL 参数，无需 X-Api-Key）"""
+        return {
+            "User-Agent": settings.USER_AGENT,
+            "Accept": "application/xml, text/xml, */*; q=0.01",
+        }
+
     def _request_with_retry(self, url: str, headers: Optional[dict] = None) -> Optional[requests.Response]:
+        """带指数退避重试的 HTTP GET 请求"""
         proxies = settings.PROXY if self._proxy else None
         last_error = None
 
@@ -348,7 +403,6 @@ class JackettIndexer(_PluginBase):
                 logger.debug(f"[{self.plugin_name}] HTTP GET (第{attempt}次): {url}")
                 ret = RequestUtils(headers=headers, timeout=self._timeout).get_res(url, proxies=proxies)
                 if ret is not None:
-                    logger.debug(f"[{self.plugin_name}] 状态码: {ret.status_code}")
                     if ret.status_code == 200:
                         return ret
                     logger.warning(f"[{self.plugin_name}] HTTP {ret.status_code} (第{attempt}次)")
@@ -380,6 +434,10 @@ class JackettIndexer(_PluginBase):
 
     @staticmethod
     def _get_categories(mtype: Optional[MediaType] = None) -> list:
+        """
+        根据媒体类型返回 Newznab 标准分类 ID。
+        2000 = Movies, 5000 = TV
+        """
         if not mtype:
             return [2000, 5000]
         if mtype == MediaType.MOVIE:
@@ -389,7 +447,7 @@ class JackettIndexer(_PluginBase):
         return [2000, 5000]
 
     def _extract_indexer_id(self, site: dict) -> str:
-        """域名格式: jackett_indexer.<indexer_id>"""
+        """从域名格式 jackett_indexer.<indexer_id> 中提取 ID"""
         domain = site.get("domain", "")
         if not domain:
             return ""

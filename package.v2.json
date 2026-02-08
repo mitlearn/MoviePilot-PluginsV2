@@ -3,26 +3,28 @@
     "name": "ProwlarrIndexer",
     "description": "聚合索引：通过 Prowlarr 检索站点资源",
     "labels": "索引器,Prowlarr,Torznab",
-    "version": "1.1",
+    "version": "2.0",
     "icon": "Prowlarr.png",
     "author": "prowlarr",
     "level": 1,
     "history": {
       "v1.0": "初始版本，支持 Prowlarr JSON API 搜索",
-      "v1.1": "修复系统模块 SiteSpider 因缺少 torrents 字段导致搜索报错的问题"
+      "v1.1": "修复系统模块 SiteSpider 因缺少 torrents 字段导致搜索报错的问题",
+      "v2.0": "增加完整文档注释；增加启动时配置校验；增加 indexerFlags 解析（freeleech/halfleech/doubleupload）；增加 IMDB ID 提取；增加 grabs/peers 字段；支持指数退避重试"
     }
   },
   "JackettIndexer": {
     "name": "JackettIndexer",
     "description": "聚合索引：通过 Jackett 检索站点资源",
     "labels": "索引器,Jackett,Torznab",
-    "version": "1.1",
+    "version": "2.0",
     "icon": "Jackett_A.png",
     "author": "prowlarr",
     "level": 1,
     "history": {
       "v1.0": "初始版本，支持 Jackett Torznab XML 搜索",
-      "v1.1": "修复系统模块 SiteSpider 因缺少 torrents 字段导致搜索报错的问题"
+      "v1.1": "修复系统模块 SiteSpider 因缺少 torrents 字段导致搜索报错的问题",
+      "v2.0": "增加完整文档注释；增加启动时配置校验；Torznab 搜索请求携带 User-Agent；增加 grabs/downloadvolumefactor/uploadvolumefactor 字段解析；支持指数退避重试"
     }
   }
 }
