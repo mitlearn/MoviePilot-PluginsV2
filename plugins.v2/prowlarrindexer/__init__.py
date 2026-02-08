@@ -139,8 +139,8 @@ class ProwlarrIndexer(_PluginBase):
         if not site_name.startswith(self.plugin_name):
             return []
 
-        logger.debug(f"[{self.plugin_name}] 搜索 -> 站点: {site_name}, "
-                     f"关键词: {keyword}, 类型: {mtype}, 页码: {page}")
+        logger.info(f"[{self.plugin_name}] 搜索 -> 站点: {site_name}, "
+                    f"关键词: {keyword}, 类型: {mtype}, 页码: {page}")
 
         indexer_id = self._extract_indexer_id(site)
         if not indexer_id:
@@ -160,10 +160,11 @@ class ProwlarrIndexer(_PluginBase):
 
         query_string = urlencode(params, quote_via=quote_plus)
         api_url = f"{self._host}/api/v1/search?{query_string}"
-        logger.debug(f"[{self.plugin_name}] 请求 URL: {api_url}")
+        logger.info(f"[{self.plugin_name}] 请求 URL: {api_url}")
 
         response = self._request_with_retry(api_url, headers=headers)
         if not response:
+            logger.warning(f"[{self.plugin_name}] {site_name} 请求无响应，跳过")
             return []
 
         try:
@@ -277,10 +278,10 @@ class ProwlarrIndexer(_PluginBase):
 
         for attempt in range(1, self._max_retries + 1):
             try:
-                logger.debug(f"[{self.plugin_name}] HTTP GET (第{attempt}次): {url}")
+                logger.info(f"[{self.plugin_name}] HTTP GET (第{attempt}次): {url}")
                 ret = RequestUtils(headers=headers, timeout=self._timeout).get_res(url, proxies=proxies)
                 if ret is not None:
-                    logger.debug(f"[{self.plugin_name}] 状态码: {ret.status_code}")
+                    logger.info(f"[{self.plugin_name}] 状态码: {ret.status_code}")
                     if ret.status_code == 200:
                         return ret
                     logger.warning(f"[{self.plugin_name}] HTTP {ret.status_code} (第{attempt}次)")
@@ -292,7 +293,7 @@ class ProwlarrIndexer(_PluginBase):
 
             if attempt < self._max_retries:
                 wait = 2 ** attempt
-                logger.debug(f"[{self.plugin_name}] {wait}秒后重试...")
+                logger.info(f"[{self.plugin_name}] {wait}秒后重试...")
                 time.sleep(wait)
 
         logger.error(f"[{self.plugin_name}] 请求失败，已重试 {self._max_retries} 次: {url}"
