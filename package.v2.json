@@ -1,34 +1,28 @@
 {
   "ProwlarrIndexer": {
-    "name": "Prowlarr索引器",
-    "description": "扩展MoviePilot搜索功能，支持通过Prowlarr聚合多个索引站点进行资源检索",
-    "labels": "索引器,搜索,Prowlarr",
-    "version": "2.3",
+    "name": "ProwlarrIndexer",
+    "description": "聚合索引：通过 Prowlarr 检索站点资源",
+    "labels": "索引器,Prowlarr,Torznab",
+    "version": "1.1",
     "icon": "Prowlarr.png",
-    "author": "claude",
+    "author": "prowlarr",
     "level": 1,
     "history": {
-      "v2.3": "完全重构，严格按照原始插件模式实现，修复站点注册和匹配逻辑",
-      "v2.2": "修复索引器注册逻辑，确保索引器正确出现在搜索站点列表",
-      "v2.1": "修正使用说明，明确无需在站点管理中添加站点",
-      "v2.0": "全新重构，优化代码结构，增强稳定性",
-      "v1.0": "初始版本，基于jtcymc的实现"
+      "v1.0": "初始版本，支持 Prowlarr JSON API 搜索",
+      "v1.1": "修复系统模块 SiteSpider 因缺少 torrents 字段导致搜索报错的问题"
     }
   },
   "JackettIndexer": {
-    "name": "Jackett索引器",
-    "description": "扩展MoviePilot搜索功能，支持通过Jackett聚合多个索引站点进行资源检索",
-    "labels": "索引器,搜索,Jackett",
-    "version": "2.3",
+    "name": "JackettIndexer",
+    "description": "聚合索引：通过 Jackett 检索站点资源",
+    "labels": "索引器,Jackett,Torznab",
+    "version": "1.1",
     "icon": "Jackett_A.png",
-    "author": "claude",
+    "author": "prowlarr",
     "level": 1,
     "history": {
-      "v2.3": "完全重构，严格按照原始插件模式实现，修复站点注册和匹配逻辑",
-      "v2.2": "修复索引器注册逻辑，确保索引器正确出现在搜索站点列表",
-      "v2.1": "修正使用说明，明确无需在站点管理中添加站点",
-      "v2.0": "全新重构，优化代码结构，增强稳定性",
-      "v1.0": "初始版本，基于jtcymc的实现"
+      "v1.0": "初始版本，支持 Jackett Torznab XML 搜索",
+      "v1.1": "修复系统模块 SiteSpider 因缺少 torrents 字段导致搜索报错的问题"
     }
   }
 }

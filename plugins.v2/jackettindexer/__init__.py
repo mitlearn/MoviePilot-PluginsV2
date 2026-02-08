@@ -36,7 +36,7 @@ class JackettIndexer(_PluginBase):
     plugin_name = "JackettIndexer"
     plugin_desc = "聚合索引：通过 Jackett 检索站点资源"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "1.0"
+    plugin_version = "1.1"
     plugin_author = "prowlarr"
     author_url = "https://github.com/prowlarr"
     plugin_config_prefix = "jackett_indexer_"
@@ -309,9 +309,8 @@ class JackettIndexer(_PluginBase):
             domain = indexer.get("domain", "")
             if not domain:
                 continue
-            if not self._sites_helper.get_indexer(domain):
-                self._sites_helper.add_indexer(domain, copy.deepcopy(indexer))
-                logger.debug(f"[{self.plugin_name}] 注册索引器: {indexer.get('name')} -> {domain}")
+            self._sites_helper.add_indexer(domain, copy.deepcopy(indexer))
+            logger.debug(f"[{self.plugin_name}] 注册索引器: {indexer.get('name')} -> {domain}")
 
     def _jackett_login(self, headers: dict) -> Optional[dict]:
         if not self._password:

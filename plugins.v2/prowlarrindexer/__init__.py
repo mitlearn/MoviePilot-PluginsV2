@@ -34,7 +34,7 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "ProwlarrIndexer"
     plugin_desc = "聚合索引：通过 Prowlarr 检索站点资源"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "1.0"
+    plugin_version = "1.1"
     plugin_author = "prowlarr"
     author_url = "https://github.com/prowlarr"
     plugin_config_prefix = "prowlarr_indexer_"
@@ -258,9 +258,8 @@ class ProwlarrIndexer(_PluginBase):
             domain = indexer.get("domain", "")
             if not domain:
                 continue
-            if not self._sites_helper.get_indexer(domain):
-                self._sites_helper.add_indexer(domain, copy.deepcopy(indexer))
-                logger.debug(f"[{self.plugin_name}] 注册索引器: {indexer.get('name')} -> {domain}")
+            self._sites_helper.add_indexer(domain, copy.deepcopy(indexer))
+            logger.debug(f"[{self.plugin_name}] 注册索引器: {indexer.get('name')} -> {domain}")
 
     # ==================== HTTP 工具 ====================
 
