@@ -178,26 +178,31 @@ class ProwlarrIndexer(_PluginBase):
 
         results = []
         for entry in data:
-            title = entry.get("title")
-            enclosure = entry.get("downloadUrl") or entry.get("magnetUrl")
-            if not title or not enclosure:
+            if not entry or not isinstance(entry, dict):
                 continue
-            torrent = TorrentInfo(
-                site_name=site_name,
-                title=title,
-                description=entry.get("sortTitle") or "",
-                enclosure=enclosure,
-                page_url=entry.get("infoUrl") or entry.get("guid", ""),
-                size=entry.get("size", 0),
-                seeders=entry.get("seeders", 0),
-                peers=entry.get("leechers") or entry.get("peers", 0),
-                grabs=entry.get("grabs", 0),
-                pubdate=entry.get("publishDate", ""),
-                imdbid=self._extract_imdb(entry),
-                downloadvolumefactor=self._parse_download_factor(entry),
-                uploadvolumefactor=self._parse_upload_factor(entry),
-            )
-            results.append(torrent)
+            try:
+                title = entry.get("title")
+                enclosure = entry.get("downloadUrl") or entry.get("magnetUrl")
+                if not title or not enclosure:
+                    continue
+                torrent = TorrentInfo(
+                    site_name=site_name,
+                    title=title,
+                    description=entry.get("sortTitle") or "",
+                    enclosure=enclosure,
+                    page_url=entry.get("infoUrl") or entry.get("guid", ""),
+                    size=entry.get("size", 0),
+                    seeders=entry.get("seeders", 0),
+                    peers=entry.get("leechers") or entry.get("peers", 0),
+                    grabs=entry.get("grabs", 0),
+                    pubdate=entry.get("publishDate", ""),
+                    imdbid=self._extract_imdb(entry),
+                    downloadvolumefactor=self._parse_download_factor(entry),
+                    uploadvolumefactor=self._parse_upload_factor(entry),
+                )
+                results.append(torrent)
+            except Exception as e:
+                logger.debug(f"[{self.plugin_name}] 解析条目出错: {e}")
 
         logger.info(f"[{self.plugin_name}] {site_name} 返回 {len(results)} 条资源")
         return results
@@ -240,6 +245,7 @@ class ProwlarrIndexer(_PluginBase):
                 "url": f"{self._host}/api/v1/indexer/{indexer_id}",
                 "public": True,
                 "proxy": self._proxy,
+                "torrents": {"list": {}, "fields": {}},
             })
 
         logger.info(f"[{self.plugin_name}] 获取到 {len(self._indexers)} 个索引器")

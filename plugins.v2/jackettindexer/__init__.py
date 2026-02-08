@@ -296,6 +296,7 @@ class JackettIndexer(_PluginBase):
                 "url": f"{self._host}/api/v2.0/indexers/{indexer_id}/results/torznab/",
                 "public": True,
                 "proxy": self._proxy,
+                "torrents": {"list": {}, "fields": {}},
             })
 
         logger.info(f"[{self.plugin_name}] 获取到 {len(self._indexers)} 个索引器")
