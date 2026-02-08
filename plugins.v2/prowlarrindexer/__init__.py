@@ -1,126 +1,111 @@
-# -*- coding: utf-8 -*-
+# _*_ coding: utf-8 _*_
+"""
+MoviePilot 插件：ProwlarrIndexer
+通过 Prowlarr API 搜索资源，将结果以 TorrentInfo 列表返回给 MoviePilot。
+"""
 import copy
+import time
 import traceback
-from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime, timedelta
-from urllib.parse import urlencode, quote_plus
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote_plus, urlencode
 
 import pytz
+import requests
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from app.helper.sites import SitesHelper
 
-from app.core.context import TorrentInfo
-from app.plugins import _PluginBase
 from app.core.config import settings
+from app.core.context import TorrentInfo
+from app.helper.sites import SitesHelper
+from app.log import logger
+from app.plugins import _PluginBase
 from app.schemas import MediaType
 from app.utils.http import RequestUtils
-from app.log import logger
-from app.utils.string import StringUtils
 
 
 class ProwlarrIndexer(_PluginBase):
-    # 插件名称 - 必须是英文，用于站点名称匹配
+    """
+    Prowlarr 索引器插件
+    通过 get_module() 劫持 search_torrents 方法，将 Prowlarr 搜索结果注入 MoviePilot 搜索链。
+    """
+
+    # ==================== 插件元数据 ====================
     plugin_name = "ProwlarrIndexer"
-    # 插件描述
-    plugin_desc = "扩展MoviePilot搜索功能，支持通过Prowlarr聚合多个索引站点进行资源检索"
-    # 插件图标
+    plugin_desc = "聚合索引：通过 Prowlarr 检索站点资源"
     plugin_icon = "Prowlarr.png"
-    # 插件版本
-    plugin_version = "2.3"
-    # 插件作者
-    plugin_author = "claude"
-    # 作者主页
-    author_url = "https://github.com/anthropics"
-    # 插件配置项ID前缀
+    plugin_version = "1.0"
+    plugin_author = "prowlarr"
+    author_url = "https://github.com/prowlarr"
     plugin_config_prefix = "prowlarr_indexer_"
-    # 加载顺序
     plugin_order = 16
-    # 可使用的用户级别
     auth_level = 1
 
-    # 私有属性
-    _scheduler = None
-    _cron = None
-    _enabled = False
-    _proxy = False
-    _host = ""
-    _api_key = ""
-    _onlyonce = False
-    _indexers = []
-    sites_helper = None
+    # 域名标识前缀
+    _domain_prefix = "prowlarr_indexer"
 
-    # 域名标识 - 两段格式，用于站点注册
-    prowlarr_domain = "prowlarr.indexer"
+    # ==================== 生命周期 ====================
+
+    def __init__(self):
+        super().__init__()
+        self._scheduler: Optional[BackgroundScheduler] = None
+        self._enabled: bool = False
+        self._host: str = ""
+        self._api_key: str = ""
+        self._proxy: bool = False
+        self._onlyonce: bool = False
+        self._cron: str = "0 0 */24 * *"
+        self._timeout: int = 30
+        self._max_retries: int = 3
+        self._indexers: list = []
+        self._sites_helper: Optional[SitesHelper] = None
 
     def init_plugin(self, config: dict = None):
-        """
-        初始化插件
-        """
-        self.sites_helper = SitesHelper()
-        # 读取配置
-        if config:
-            self._host = config.get("host")
-            if self._host:
-                if not self._host.startswith('http'):
-                    self._host = "http://" + self._host
-                if self._host.endswith('/'):
-                    self._host = self._host.rstrip('/')
-            self._api_key = config.get("api_key")
-            self._enabled = config.get("enabled")
-            self._proxy = config.get("proxy")
-            self._onlyonce = config.get("onlyonce")
-            self._cron = config.get("cron") or "0 0 */24 * *"
+        self._sites_helper = SitesHelper()
+        self._indexers = []
 
-        # 停止现有任务
+        if config:
+            self._enabled = config.get("enabled", False)
+            self._host = self._normalize_host(config.get("host", ""))
+            self._api_key = config.get("api_key", "")
+            self._proxy = config.get("proxy", False)
+            self._onlyonce = config.get("onlyonce", False)
+            self._cron = config.get("cron") or "0 0 */24 * *"
+            self._timeout = int(config.get("timeout", 30))
+            self._max_retries = int(config.get("max_retries", 3))
+
         self.stop_service()
 
-        # 启动定时任务 & 立即运行一次
+        if not self._enabled:
+            return
+
         self._scheduler = BackgroundScheduler(timezone=settings.TZ)
         if self._cron:
-            logger.info(f"【{self.plugin_name}】索引更新服务启动，周期：{self._cron}")
-            self._scheduler.add_job(self.get_status, CronTrigger.from_crontab(self._cron))
+            logger.info(f"[{self.plugin_name}] 索引更新服务启动，周期：{self._cron}")
+            self._scheduler.add_job(self._refresh_indexers, CronTrigger.from_crontab(self._cron))
 
         if self._onlyonce:
-            logger.info(f"【{self.plugin_name}】开始获取索引器状态")
-            self._scheduler.add_job(self.get_status, 'date',
-                                    run_date=datetime.now(tz=pytz.timezone(settings.TZ)) + timedelta(seconds=3))
-            # 关闭一次性开关
+            logger.info(f"[{self.plugin_name}] 立即获取索引器列表")
+            self._scheduler.add_job(
+                self._refresh_indexers, "date",
+                run_date=datetime.now(tz=pytz.timezone(settings.TZ)) + timedelta(seconds=3),
+            )
             self._onlyonce = False
-            self.__update_config()
+            self._save_config()
 
-        if self._cron or self._onlyonce:
-            # 启动服务
+        if self._scheduler.get_jobs():
             self._scheduler.print_jobs()
             self._scheduler.start()
 
-        # 获取索引器并注册
         if not self._indexers:
-            self.get_status()
+            self._refresh_indexers()
 
-        for indexer in self._indexers:
-            domain = indexer.get("domain", "")
-            site_info = self.sites_helper.get_indexer(domain)
-            if not site_info:
-                new_indexer = copy.deepcopy(indexer)
-                self.sites_helper.add_indexer(domain, new_indexer)
-
-    def get_status(self):
-        """
-        检查连通性
-        """
-        if not self._api_key or not self._host:
-            return False
-        self._indexers = self.get_indexers()
-        return True if isinstance(self._indexers, list) and len(self._indexers) > 0 else False
+        self._register_indexers()
 
     def get_state(self) -> bool:
         return self._enabled
 
     def stop_service(self):
-        """
-        退出插件
-        """
         try:
             if self._scheduler:
                 self._scheduler.remove_all_jobs()
@@ -128,376 +113,462 @@ class ProwlarrIndexer(_PluginBase):
                     self._scheduler.shutdown()
                 self._scheduler = None
         except Exception as e:
-            logger.error(f"【{self.plugin_name}】停止插件错误: {str(e)}")
+            logger.error(f"[{self.plugin_name}] 停止服务出错: {e}")
 
-    def __update_config(self):
+    # ==================== 模块劫持 ====================
+
+    def get_module(self) -> Dict[str, Any]:
+        return {"search_torrents": self.search_torrents}
+
+    # ==================== 搜索逻辑 ====================
+
+    def search_torrents(
+        self,
+        site: dict,
+        keyword: str = None,
+        mtype: Optional[MediaType] = None,
+        cat: Optional[str] = None,
+        page: Optional[int] = 0,
+    ) -> List[TorrentInfo]:
         """
-        更新插件配置
+        MoviePilot 搜索链回调。仅处理本插件注册的站点。
         """
+        if not site or not keyword:
+            return []
+        site_name = site.get("name", "")
+        if not site_name.startswith(self.plugin_name):
+            return []
+
+        logger.debug(f"[{self.plugin_name}] 搜索 -> 站点: {site_name}, "
+                     f"关键词: {keyword}, 类型: {mtype}, 页码: {page}")
+
+        indexer_id = self._extract_indexer_id(site)
+        if not indexer_id:
+            logger.warning(f"[{self.plugin_name}] 无法提取 indexer ID: {site_name}")
+            return []
+
+        headers = self._build_headers()
+        categories = self._get_categories(mtype)
+
+        params = [
+            ("query", keyword),
+            ("indexerIds", indexer_id),
+            ("type", "search"),
+            ("limit", 150),
+            ("offset", (page or 0) * 150),
+        ] + [("categories", c) for c in categories]
+
+        query_string = urlencode(params, quote_via=quote_plus)
+        api_url = f"{self._host}/api/v1/search?{query_string}"
+        logger.debug(f"[{self.plugin_name}] 请求 URL: {api_url}")
+
+        response = self._request_with_retry(api_url, headers=headers)
+        if not response:
+            return []
+
+        try:
+            data = response.json()
+        except Exception as e:
+            logger.error(f"[{self.plugin_name}] JSON 解析失败: {e}")
+            return []
+
+        if not isinstance(data, list):
+            logger.warning(f"[{self.plugin_name}] 返回非列表数据")
+            return []
+
+        results = []
+        for entry in data:
+            title = entry.get("title")
+            enclosure = entry.get("downloadUrl") or entry.get("magnetUrl")
+            if not title or not enclosure:
+                continue
+            torrent = TorrentInfo(
+                site_name=site_name,
+                title=title,
+                description=entry.get("sortTitle") or "",
+                enclosure=enclosure,
+                page_url=entry.get("infoUrl") or entry.get("guid", ""),
+                size=entry.get("size", 0),
+                seeders=entry.get("seeders", 0),
+                peers=entry.get("leechers") or entry.get("peers", 0),
+                grabs=entry.get("grabs", 0),
+                pubdate=entry.get("publishDate", ""),
+                imdbid=self._extract_imdb(entry),
+                downloadvolumefactor=self._parse_download_factor(entry),
+                uploadvolumefactor=self._parse_upload_factor(entry),
+            )
+            results.append(torrent)
+
+        logger.info(f"[{self.plugin_name}] {site_name} 返回 {len(results)} 条资源")
+        return results
+
+    # ==================== 索引器管理 ====================
+
+    def _refresh_indexers(self):
+        if not self._api_key or not self._host:
+            logger.warning(f"[{self.plugin_name}] 地址或 API Key 未配置")
+            return
+
+        headers = self._build_headers()
+        url = f"{self._host}/api/v1/indexerstats"
+        logger.debug(f"[{self.plugin_name}] 索引器列表请求: {url}")
+
+        response = self._request_with_retry(url, headers=headers)
+        if not response:
+            return
+
+        try:
+            data = response.json()
+        except Exception as e:
+            logger.error(f"[{self.plugin_name}] 索引器响应解析失败: {e}")
+            return
+
+        if not data or "indexers" not in data:
+            logger.warning(f"[{self.plugin_name}] 返回数据不含 indexers 字段")
+            return
+
+        self._indexers = []
+        for v in data.get("indexers", []):
+            indexer_id = v.get("indexerId")
+            indexer_name = v.get("indexerName")
+            if not indexer_id or not indexer_name:
+                continue
+            self._indexers.append({
+                "id": f"{self.plugin_name}-{indexer_name}",
+                "name": f"{self.plugin_name}-{indexer_name}",
+                "domain": f"{self._domain_prefix}.{indexer_id}",
+                "url": f"{self._host}/api/v1/indexer/{indexer_id}",
+                "public": True,
+                "proxy": self._proxy,
+            })
+
+        logger.info(f"[{self.plugin_name}] 获取到 {len(self._indexers)} 个索引器")
+        self._register_indexers()
+
+    def _register_indexers(self):
+        if not self._sites_helper:
+            return
+        for indexer in self._indexers:
+            domain = indexer.get("domain", "")
+            if not domain:
+                continue
+            if not self._sites_helper.get_indexer(domain):
+                self._sites_helper.add_indexer(domain, copy.deepcopy(indexer))
+                logger.debug(f"[{self.plugin_name}] 注册索引器: {indexer.get('name')} -> {domain}")
+
+    # ==================== HTTP 工具 ====================
+
+    def _build_headers(self) -> dict:
+        return {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "User-Agent": settings.USER_AGENT,
+            "X-Api-Key": self._api_key,
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+        }
+
+    def _request_with_retry(self, url: str, headers: Optional[dict] = None) -> Optional[requests.Response]:
+        proxies = settings.PROXY if self._proxy else None
+        last_error = None
+
+        for attempt in range(1, self._max_retries + 1):
+            try:
+                logger.debug(f"[{self.plugin_name}] HTTP GET (第{attempt}次): {url}")
+                ret = RequestUtils(headers=headers, timeout=self._timeout).get_res(url, proxies=proxies)
+                if ret is not None:
+                    logger.debug(f"[{self.plugin_name}] 状态码: {ret.status_code}")
+                    if ret.status_code == 200:
+                        return ret
+                    logger.warning(f"[{self.plugin_name}] HTTP {ret.status_code} (第{attempt}次)")
+                else:
+                    logger.warning(f"[{self.plugin_name}] 无响应 (第{attempt}次)")
+            except Exception as e:
+                last_error = e
+                logger.warning(f"[{self.plugin_name}] 请求异常 (第{attempt}次): {e}")
+
+            if attempt < self._max_retries:
+                wait = 2 ** attempt
+                logger.debug(f"[{self.plugin_name}] {wait}秒后重试...")
+                time.sleep(wait)
+
+        logger.error(f"[{self.plugin_name}] 请求失败，已重试 {self._max_retries} 次: {url}"
+                     + (f" 最后错误: {last_error}" if last_error else ""))
+        return None
+
+    # ==================== 辅助方法 ====================
+
+    @staticmethod
+    def _normalize_host(host: str) -> str:
+        if not host:
+            return ""
+        host = host.strip()
+        if not host.startswith("http"):
+            host = "http://" + host
+        return host.rstrip("/")
+
+    @staticmethod
+    def _get_categories(mtype: Optional[MediaType] = None) -> list:
+        if not mtype:
+            return [2000, 5000]
+        if mtype == MediaType.MOVIE:
+            return [2000]
+        if mtype == MediaType.TV:
+            return [5000]
+        return [2000, 5000]
+
+    def _extract_indexer_id(self, site: dict) -> str:
+        """域名格式: prowlarr_indexer.<indexer_id>"""
+        domain = site.get("domain", "")
+        if not domain:
+            return ""
+        parts = domain.split(".")
+        return parts[-1] if len(parts) >= 2 else ""
+
+    @staticmethod
+    def _extract_imdb(entry: dict) -> str:
+        imdb_id = entry.get("imdbId")
+        if imdb_id and isinstance(imdb_id, int) and imdb_id > 0:
+            return f"tt{imdb_id:07d}"
+        return ""
+
+    @staticmethod
+    def _parse_download_factor(entry: dict) -> Optional[float]:
+        flags = entry.get("indexerFlags") or []
+        if isinstance(flags, list):
+            for flag in flags:
+                s = str(flag).lower()
+                if "freeleech" in s:
+                    return 0.0
+                if "halfleech" in s:
+                    return 0.5
+        return None
+
+    @staticmethod
+    def _parse_upload_factor(entry: dict) -> Optional[float]:
+        flags = entry.get("indexerFlags") or []
+        if isinstance(flags, list):
+            for flag in flags:
+                if "doubleupload" in str(flag).lower():
+                    return 2.0
+        return None
+
+    def _save_config(self):
         self.update_config({
             "enabled": self._enabled,
-            "onlyonce": False,
-            "cron": self._cron,
             "host": self._host,
             "api_key": self._api_key,
             "proxy": self._proxy,
+            "onlyonce": self._onlyonce,
+            "cron": self._cron,
+            "timeout": self._timeout,
+            "max_retries": self._max_retries,
         })
 
-    def get_api(self) -> List[Dict[str, Any]]:
-        pass
-
-    def get_module(self) -> Dict[str, Any]:
-        """
-        获取插件模块声明
-        """
-        return {
-            "search_torrents": self.search_torrents,
-        }
-
-    def get_indexers(self):
-        """
-        获取配置的 Prowlarr Indexer 信息
-        """
-        headers = {
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "User-Agent": settings.USER_AGENT,
-            "X-Api-Key": self._api_key,
-            "Accept": "application/json, text/javascript, */*; q=0.01"
-        }
-        indexer_query_url = f"{self._host}/api/v1/indexerstats"
-        try:
-            ret = RequestUtils(headers=headers).get_res(indexer_query_url)
-            if not ret:
-                logger.warning(f"【{self.plugin_name}】获取 indexer 请求无响应")
-                return []
-
-            data = ret.json()
-            if not data or "indexers" not in data:
-                logger.warning(f"【{self.plugin_name}】返回数据不包含 indexers 字段")
-                return []
-
-            indexers_raw = data.get("indexers", [])
-            if not indexers_raw:
-                logger.info(f"【{self.plugin_name}】未配置任何 indexer")
-                return []
-
-            indexers = []
-            for v in indexers_raw:
-                indexer_id = v.get("indexerId")
-                indexer_name = v.get("indexerName")
-                if not indexer_id or not indexer_name:
-                    continue
-
-                # 使用与原始插件相同的格式
-                indexers.append({
-                    "id": f'{self.plugin_name}-{indexer_name}',
-                    "name": f'{self.plugin_name}-{indexer_name}',
-                    "url": f'{self._host}/api/v1/indexer/{indexer_id}',
-                    "domain": f'{self.prowlarr_domain}.{indexer_id}',
-                    "public": True,
-                    "proxy": self._proxy,
-                })
-
-            logger.info(f"【{self.plugin_name}】获取到 {len(indexers)} 个索引器")
-            return indexers
-        except Exception as e:
-            logger.error(f"【{self.plugin_name}】获取 indexer 失败：{str(e)}")
-            return []
-
-    def search_torrents(self, site: dict, keyword: str, mtype: Optional[MediaType] = None,
-                        page: Optional[int] = 0) -> List[TorrentInfo]:
-        """
-        根据关键字检索种子
-        """
-        results = []
-
-        if not site or not keyword:
-            return results
-
-        # 检查是否是本插件注册的站点
-        if site.get("name", "").split("-")[0] != self.plugin_name:
-            return results
-
-        # 提取 Indexer ID
-        domain = StringUtils.get_url_domain(site.get("domain", ""))
-        indexer_id = domain.split(".")[-1] if domain else ""
-        if not indexer_id:
-            logger.warning(f"【{self.plugin_name}】无法提取索引 ID，跳过站点：{site.get('name')}")
-            return results
-
-        # 构建请求头
-        headers = {
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "User-Agent": settings.USER_AGENT,
-            "X-Api-Key": self._api_key,
-            "Accept": "application/json, text/javascript, */*; q=0.01"
-        }
-        categories = self.get_cat(mtype)
-
-        try:
-            logger.info(f"【{self.plugin_name}】开始检索 Indexer：{site.get('name')}，关键词：{keyword}")
-            params = [
-                ("query", keyword),
-                ("indexerIds", indexer_id),
-                ("type", "search"),
-                ("limit", 150),
-                ("offset", page * 150 if page else 0),
-            ] + [("categories", cat) for cat in categories]
-            query_string = urlencode(params, quote_via=quote_plus)
-            api_url = f"{self._host}/api/v1/search?{query_string}"
-
-            response = RequestUtils(headers=headers).get_res(api_url)
-            if not response:
-                logger.warning(f"【{self.plugin_name}】{site.get('name')} 返回为空")
-                return results
-
-            data = response.json()
-            if not isinstance(data, list):
-                logger.warning(f"【{self.plugin_name}】{site.get('name')} 返回数据格式异常")
-                return results
-
-            for entry in data:
-                torrent = TorrentInfo(
-                    title=entry.get("title"),
-                    enclosure=entry.get("downloadUrl") or entry.get("magnetUrl"),
-                    description=entry.get("sortTitle"),
-                    size=entry.get("size"),
-                    seeders=entry.get("seeders"),
-                    peers=entry.get("leechers"),
-                    pubdate=entry.get("publishDate"),
-                    page_url=entry.get("infoUrl") or entry.get("guid"),
-                    site_name=site.get("name"),
-                )
-                results.append(torrent)
-
-            logger.info(f"【{self.plugin_name}】{site.get('name')} 返回 {len(results)} 条结果")
-
-        except Exception as e:
-            logger.error(f"【{self.plugin_name}】检索错误：{str(e)}\n{traceback.format_exc()}")
-
-        return results
+    # ==================== 插件接口 ====================
 
     @staticmethod
-    def get_cat(mtype: Optional[MediaType] = None):
-        if not mtype:
-            return [2000, 5000]
-        elif mtype == MediaType.MOVIE:
-            return [2000]
-        elif mtype == MediaType.TV:
-            return [5000]
-        else:
-            return [2000, 5000]
+    def get_command() -> List[Dict[str, Any]]:
+        return []
+
+    def get_api(self) -> List[Dict[str, Any]]:
+        return []
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
-        """
-        拼装插件配置页面
-        """
         return [
             {
-                'component': 'VForm',
-                'content': [
+                "component": "VForm",
+                "content": [
                     {
-                        'component': 'VRow',
-                        'content': [
+                        "component": "VRow",
+                        "content": [
                             {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 4},
-                                'content': [{
-                                    'component': 'VSwitch',
-                                    'props': {
-                                        'model': 'enabled',
-                                        'label': '启用插件',
-                                    }
-                                }]
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [{
+                                    "component": "VSwitch",
+                                    "props": {"model": "enabled", "label": "启用插件"},
+                                }],
                             },
                             {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 4},
-                                'content': [{
-                                    'component': 'VSwitch',
-                                    'props': {
-                                        'model': 'proxy',
-                                        'label': '使用代理服务器',
-                                    }
-                                }]
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [{
+                                    "component": "VSwitch",
+                                    "props": {"model": "proxy", "label": "使用代理"},
+                                }],
                             },
                             {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 4},
-                                'content': [{
-                                    'component': 'VSwitch',
-                                    'props': {
-                                        'model': 'onlyonce',
-                                        'label': '立即运行一次',
-                                    }
-                                }]
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [{
+                                    "component": "VSwitch",
+                                    "props": {
+                                        "model": "onlyonce",
+                                        "label": "立即刷新索引",
+                                        "hint": "打开后立即获取索引器列表",
+                                    },
+                                }],
                             },
-                        ]
+                        ],
                     },
                     {
-                        'component': 'VRow',
-                        'content': [
+                        "component": "VRow",
+                        "content": [
                             {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 6},
-                                'content': [{
-                                    'component': 'VTextField',
-                                    'props': {
-                                        'model': 'host',
-                                        'label': 'Prowlarr地址',
-                                        'placeholder': 'http://127.0.0.1:9696',
-                                        'hint': 'Prowlarr访问地址和端口'
-                                    }
-                                }]
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [{
+                                    "component": "VTextField",
+                                    "props": {
+                                        "model": "host",
+                                        "label": "Prowlarr 地址",
+                                        "placeholder": "http://127.0.0.1:9696",
+                                        "hint": "Prowlarr 访问地址，需先在 Prowlarr 中搜索一次以生成索引统计",
+                                    },
+                                }],
                             },
                             {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 6},
-                                'content': [{
-                                    'component': 'VTextField',
-                                    'props': {
-                                        'model': 'api_key',
-                                        'label': 'Api Key',
-                                        'placeholder': '',
-                                        'hint': '在Prowlarr->Settings->General->API Key中获取'
-                                    }
-                                }]
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [{
+                                    "component": "VTextField",
+                                    "props": {
+                                        "model": "api_key",
+                                        "label": "API Key",
+                                        "hint": "Settings -> General -> Security -> API Key",
+                                    },
+                                }],
                             },
-                        ]
+                        ],
                     },
                     {
-                        'component': 'VRow',
-                        'content': [
+                        "component": "VRow",
+                        "content": [
                             {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 6},
-                                'content': [{
-                                    'component': 'VTextField',
-                                    'props': {
-                                        'model': 'cron',
-                                        'label': '更新周期',
-                                        'placeholder': '0 0 */24 * *',
-                                        'hint': '索引列表更新周期，5位cron表达式'
-                                    }
-                                }]
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [{
+                                    "component": "VTextField",
+                                    "props": {
+                                        "model": "cron",
+                                        "label": "索引更新周期",
+                                        "placeholder": "0 0 */24 * *",
+                                        "hint": "Cron 表达式，默认每24小时",
+                                    },
+                                }],
                             },
-                        ]
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [{
+                                    "component": "VTextField",
+                                    "props": {
+                                        "model": "timeout",
+                                        "label": "超时(秒)",
+                                        "type": "number",
+                                        "placeholder": "30",
+                                    },
+                                }],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [{
+                                    "component": "VTextField",
+                                    "props": {
+                                        "model": "max_retries",
+                                        "label": "重试次数",
+                                        "type": "number",
+                                        "placeholder": "3",
+                                    },
+                                }],
+                            },
+                        ],
                     },
                     {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {'cols': 12},
-                                'content': [{
-                                    'component': 'VAlert',
-                                    'props': {
-                                        'type': 'success',
-                                        'variant': 'tonal',
-                                        'text': '使用说明：'
-                                                '1. 填写Prowlarr地址和API Key；'
-                                                '2. 启用插件并点击"立即运行一次"；'
-                                                '3. 前往 设置->搜索->索引站点 勾选 ProwlarrIndexer 开头的索引器；'
-                                                '4. 搜索时将自动调用Prowlarr'
-                                    }
-                                }]
-                            }
-                        ]
+                        "component": "VRow",
+                        "content": [{
+                            "component": "VCol",
+                            "props": {"cols": 12},
+                            "content": [{
+                                "component": "VAlert",
+                                "props": {
+                                    "type": "info",
+                                    "variant": "tonal",
+                                    "text": "使用说明：\n"
+                                            "1. 填写 Prowlarr 地址和 API Key，开启「立即刷新索引」\n"
+                                            "2. 在「查看数据」页面复制站点 domain\n"
+                                            "3. 到站点管理新增站点（格式: https://<domain>）\n"
+                                            "4. 在搜索设置中勾选新增的站点即可使用",
+                                },
+                            }],
+                        }],
                     },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {'cols': 12},
-                                'content': [{
-                                    'component': 'VAlert',
-                                    'props': {
-                                        'type': 'warning',
-                                        'variant': 'tonal',
-                                        'text': '注意：无需在"站点管理"中添加站点！索引器会自动注册到搜索系统。'
-                                    }
-                                }]
-                            }
-                        ]
-                    }
-                ]
+                ],
             }
         ], {
             "enabled": False,
             "host": "",
             "api_key": "",
             "proxy": False,
+            "onlyonce": False,
             "cron": "0 0 */24 * *",
-            "onlyonce": False
+            "timeout": 30,
+            "max_retries": 3,
         }
 
-    def _ensure_sites_loaded(self) -> bool:
-        """
-        确保索引器已加载
-        """
-        if isinstance(self._indexers, list) and len(self._indexers) > 0:
-            return True
-        self.get_status()
-        return isinstance(self._indexers, list) and len(self._indexers) > 0
-
     def get_page(self) -> List[dict]:
-        """
-        拼装插件详情页面
-        """
-        if not self._ensure_sites_loaded():
+        if not self._indexers:
+            self._refresh_indexers()
+        if not self._indexers:
             return [{
-                'component': 'VRow',
-                'content': [{
-                    'component': 'VCol',
-                    'props': {'cols': 12},
-                    'content': [{
-                        'component': 'VAlert',
-                        'props': {
-                            'type': 'warning',
-                            'variant': 'tonal',
-                            'text': '未获取到任何索引器，请检查Prowlarr配置'
-                        }
-                    }]
-                }]
+                "component": "VRow",
+                "content": [{
+                    "component": "VCol",
+                    "props": {"cols": 12},
+                    "content": [{
+                        "component": "VAlert",
+                        "props": {
+                            "type": "warning",
+                            "variant": "tonal",
+                            "text": "未获取到任何索引器，请检查配置后点击「立即刷新索引」",
+                        },
+                    }],
+                }],
             }]
 
-        items = []
+        rows = []
         for site in self._indexers:
-            items.append({
-                'component': 'tr',
-                'content': [
-                    {'component': 'td', 'text': site.get("name")},
-                    {'component': 'td', 'text': site.get("domain")},
-                ]
+            rows.append({
+                "component": "tr",
+                "content": [
+                    {"component": "td", "text": site.get("name", "")},
+                    {"component": "td", "text": f"https://{site.get('domain', '')}"},
+                    {"component": "td", "text": "是" if site.get("public") else "否"},
+                ],
             })
 
-        return [
-            {
-                'component': 'VRow',
-                'content': [{
-                    'component': 'VCol',
-                    'props': {'cols': 12},
-                    'content': [{
-                        'component': 'VTable',
-                        'props': {'hover': True},
-                        'content': [
-                            {
-                                'component': 'thead',
-                                'content': [{
-                                    'component': 'tr',
-                                    'content': [
-                                        {'component': 'th', 'props': {'class': 'text-start ps-4'}, 'text': '索引器名称'},
-                                        {'component': 'th', 'props': {'class': 'text-start ps-4'}, 'text': '域名标识'},
-                                    ]
-                                }]
-                            },
-                            {
-                                'component': 'tbody',
-                                'content': items
-                            }
-                        ]
-                    }]
-                }]
-            }
-        ]
+        return [{
+            "component": "VRow",
+            "content": [{
+                "component": "VCol",
+                "props": {"cols": 12},
+                "content": [{
+                    "component": "VTable",
+                    "props": {"hover": True},
+                    "content": [
+                        {
+                            "component": "thead",
+                            "content": [{
+                                "component": "tr",
+                                "content": [
+                                    {"component": "th", "props": {"class": "text-start ps-4"}, "text": "索引器名称"},
+                                    {"component": "th", "props": {"class": "text-start ps-4"}, "text": "站点 Domain"},
+                                    {"component": "th", "props": {"class": "text-start ps-4"}, "text": "公开"},
+                                ],
+                            }],
+                        },
+                        {"component": "tbody", "content": rows},
+                    ],
+                }],
+            }],
+        }]
