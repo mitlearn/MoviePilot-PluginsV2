@@ -3,7 +3,7 @@
     "name": "Prowlarr索引器",
     "description": "集成Prowlarr索引器搜索，支持多站点统一搜索",
     "labels": "indexer,prowlarr,torrent,search",
-    "version": "0.1.6",
+    "version": "0.5.0",
     "icon": "Prowlarr.png",
     "author": "Claude",
     "level": 1,
@@ -14,14 +14,17 @@
       "v0.1.3": "修复站点注册问题：恢复torrents和parser的字典结构(空selector和disabled)以确保add_indexer成功；增加注册成功/失败的详细日志；简化站点配置避免不必要字段",
       "v0.1.4": "优化域名可读性：使用索引器名称代替数字ID生成域名(如prowlarr.morethan-tv.indexer)；重写get_page方法使用标准表格组件；简化表格显示仅保留核心字段",
       "v0.1.5": "修复站点可见性问题：优先使用add_site而非add_indexer；添加active/is_active/limit等字段确保站点在搜索列表中显示；将public强制设为true提高可见性",
-      "v0.1.6": "修复站点管理注册逻辑：实现正确的站点检查和注册流程，使用get_indexer检查站点是否存在，仅在不存在时通过深拷贝添加；分离初始化流程为获取索引器和同步站点管理两个阶段，确保所有索引器正确显示在站点管理列表中"
+      "v0.1.6": "修复站点管理注册逻辑：实现正确的站点检查和注册流程，使用get_indexer检查站点是否存在，仅在不存在时通过深拷贝添加；分离初始化流程为获取索引器和同步站点管理两个阶段，确保所有索引器正确显示在站点管理列表中",
+      "v0.4.0": "重大突破：实现async_search_torrents方法劫持MoviePilot搜索系统，成功解决搜索不被调用的核心问题；完全重构站点字典结构，匹配系统预期；使用StringUtils.get_url_domain解析domain；添加自动清理旧站点逻辑",
+      "v0.4.1": "修复indexerFlags解析错误：正确处理列表类型的indexerFlags字段，避免位运算类型错误；兼容整数和列表两种格式",
+      "v0.5.0": "完善促销信息解析：正确识别Freeleech(免费)、Halfleech(半价)、DoubleUpload(2X上传)、PersonalFreeleech等促销标志；精确设置downloadvolumefactor和uploadvolumefactor；添加促销信息调试日志"
     }
   },
   "JackettIndexer": {
     "name": "Jackett索引器",
     "description": "集成Jackett索引器搜索，支持Torznab协议多站点搜索",
     "labels": "indexer,jackett,torrent,search,torznab",
-    "version": "0.1.6",
+    "version": "0.5.0",
     "icon": "Jackett_A.png",
     "author": "Claude",
     "level": 1,
@@ -32,7 +35,9 @@
       "v0.1.3": "修复站点注册问题：恢复torrents和parser的字典结构(空selector和disabled)以确保add_indexer成功；增加注册成功/失败的详细日志；简化站点配置避免不必要字段",
       "v0.1.4": "优化域名可读性：使用索引器名称代替数字ID生成域名(如jackett.morethan-tv.indexer)；重写get_page方法使用标准表格组件；简化表格显示仅保留核心字段",
       "v0.1.5": "修复站点可见性问题：优先使用add_site而非add_indexer；添加active/is_active/limit等字段确保站点在搜索列表中显示；将public强制设为true提高可见性",
-      "v0.1.6": "修复站点管理注册逻辑：实现正确的站点检查和注册流程，使用get_indexer检查站点是否存在，仅在不存在时通过深拷贝添加；分离初始化流程为获取索引器和同步站点管理两个阶段，确保所有索引器正确显示在站点管理列表中"
+      "v0.1.6": "修复站点管理注册逻辑：实现正确的站点检查和注册流程，使用get_indexer检查站点是否存在，仅在不存在时通过深拷贝添加；分离初始化流程为获取索引器和同步站点管理两个阶段，确保所有索引器正确显示在站点管理列表中",
+      "v0.4.0": "重大突破：实现async_search_torrents方法劫持MoviePilot搜索系统，成功解决搜索不被调用的核心问题；完全重构站点字典结构，匹配系统预期；使用StringUtils.get_url_domain解析domain；添加自动清理旧站点逻辑；Torznab XML解析完整支持种子元数据",
+      "v0.5.0": "版本同步：与Prowlarr插件保持一致的版本号和架构"
     }
   }
 }

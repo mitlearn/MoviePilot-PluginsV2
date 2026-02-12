@@ -41,7 +41,7 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "Prowlarr索引器"
     plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "0.4.1"
+    plugin_version = "0.5.0"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "prowlarrindexer_"
@@ -654,13 +654,46 @@ class ProwlarrIndexer(_PluginBase):
                 return None
 
             # Parse indexer flags (Prowlarr returns a list/array)
+            # Prowlarr indexerFlags常见值：
+            # 1 = G_Freeleech (免费)
+            # 4 = G_Halfleech (半价)
+            # 8 = G_DoubleUpload (双倍上传)
+            # 32 = G_PersonalFreeleech (个人免费)
             indexer_flags = item.get("indexerFlags", [])
-            # Check for Freeleech flag (value 1 in the list)
-            is_freeleech = False
+            download_volume_factor = 1.0
+            upload_volume_factor = 1.0
+
             if isinstance(indexer_flags, list):
-                is_freeleech = 1 in indexer_flags
+                # Freeleech (完全免费)
+                if 1 in indexer_flags or 32 in indexer_flags:
+                    download_volume_factor = 0.0
+                # Halfleech (半价)
+                elif 4 in indexer_flags:
+                    download_volume_factor = 0.5
+
+                # DoubleUpload (双倍上传)
+                if 8 in indexer_flags:
+                    upload_volume_factor = 2.0
             elif isinstance(indexer_flags, int):
-                is_freeleech = (indexer_flags & 1) == 1
+                # 兼容整数格式（位运算）
+                if indexer_flags & 1 or indexer_flags & 32:  # Freeleech
+                    download_volume_factor = 0.0
+                elif indexer_flags & 4:  # Halfleech
+                    download_volume_factor = 0.5
+
+                if indexer_flags & 8:  # DoubleUpload
+                    upload_volume_factor = 2.0
+
+            # 记录促销信息（仅在有促销时）
+            if download_volume_factor < 1.0 or upload_volume_factor > 1.0:
+                promo_info = []
+                if download_volume_factor == 0.0:
+                    promo_info.append("免费")
+                elif download_volume_factor == 0.5:
+                    promo_info.append("半价")
+                if upload_volume_factor == 2.0:
+                    promo_info.append("2X上传")
+                logger.debug(f"【{self.plugin_name}】种子促销：{title[:50]}... -> {', '.join(promo_info)}")
 
             # Build TorrentInfo object
             torrent = TorrentInfo(
@@ -674,8 +707,8 @@ class ProwlarrIndexer(_PluginBase):
                 site_name=site_name,
                 pubdate=self._parse_publish_date(item.get("publishDate", "")),
                 imdbid=self._format_imdb_id(item.get("imdbId")),
-                downloadvolumefactor=0.0 if is_freeleech else 1.0,
-                uploadvolumefactor=1.0,
+                downloadvolumefactor=download_volume_factor,
+                uploadvolumefactor=upload_volume_factor,
                 grabs=item.get("grabs", 0),
             )
 
