@@ -39,7 +39,7 @@ class JackettIndexer(_PluginBase):
     plugin_name = "Jackett索引器"
     plugin_desc = "集成Jackett索引器搜索，支持Torznab协议多站点搜索。"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "0.1.1"
+    plugin_version = "0.1.2"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "jackettindexer_"
@@ -106,6 +106,9 @@ class JackettIndexer(_PluginBase):
         logger.info(f"【{self.plugin_name}】开始同步索引器列表...")
         if self._sync_indexers():
             logger.info(f"【{self.plugin_name}】成功同步 {len(self._indexers)} 个索引器")
+            # Log registered indexers for debugging
+            for idx in self._indexers:
+                logger.debug(f"【{self.plugin_name}】已注册索引器：{idx.get('name')} (domain: {idx.get('domain')})")
         else:
             logger.error(f"【{self.plugin_name}】同步索引器失败")
             return
@@ -294,33 +297,42 @@ class JackettIndexer(_PluginBase):
         domain = f"http://{self.DOMAIN_PREFIX}.{indexer_id.lower().replace(' ', '-')}.indexer"
 
         # Build complete indexer dictionary
+        # CRITICAL: This structure must prevent MoviePilot from using default spider
         return {
+            # Basic identification
             "id": f"{self.plugin_name}-{indexer_id}",
             "name": f"{self.plugin_name}-{indexer_title}",
             "domain": domain,
             "url": self._host,
+
+            # Custom fields for our plugin
             "indexer_id": indexer_id,  # Store original Jackett ID
             "indexer_title": indexer_title,
+
+            # Site properties
             "public": indexer.get("type", "") == "public",
             "proxy": self._proxy,
             "language": indexer.get("language", "en-US"),
             "protocol": "torrent",
-            # Critical: Disable spider/crawler to force module hijacking
-            "render": False,  # Don't use browser rendering
-            "chrome": False,  # Don't use Chrome
-            # Empty RSS/search config - not used for API-based indexers
+
+            # Critical: Mark as API-based indexer
+            "type": "indexer",  # Special type for API indexers
+
+            # Disable all spider/crawler features
+            "render": False,
+            "chrome": False,
+            "playwright": False,
+
+            # Explicitly disable site features
             "rss": None,
             "search": None,
             "browse": None,
-            # Add torrents structure to prevent spider crashes
-            "torrents": {
-                "list": {
-                    "selector": "",  # Not used for API-based indexers
-                }
-            },
-            "parser": {
-                "enabled": False  # API-based, no HTML parsing needed
-            }
+            "torrents": None,  # No HTML parsing needed
+            "parser": None,  # No parser needed
+
+            # Cookie and headers - empty for API access
+            "cookie": "",
+            "ua": None,
         }
 
     def get_state(self) -> bool:
@@ -371,6 +383,7 @@ class JackettIndexer(_PluginBase):
         Returns:
             Dictionary mapping method names to plugin methods
         """
+        logger.info(f"【{self.plugin_name}】get_module 被调用，注册 search_torrents 方法")
         return {
             "search_torrents": self.search_torrents,
         }
