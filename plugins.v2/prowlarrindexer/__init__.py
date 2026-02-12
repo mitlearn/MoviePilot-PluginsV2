@@ -40,7 +40,7 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "Prowlarr索引器"
     plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "0.2.3"
+    plugin_version = "0.2.4"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "prowlarrindexer_"
@@ -350,10 +350,13 @@ class ProwlarrIndexer(_PluginBase):
             logger.debug(f"【{self.plugin_name}】get_module 被调用，但插件未启用，返回空字典")
             return {}
 
-        logger.info(f"【{self.plugin_name}】get_module 被调用，注册 search_torrents 方法")
-        return {
+        result = {
             "search_torrents": self.search_torrents,
         }
+        logger.info(f"【{self.plugin_name}】get_module 被调用，注册 search_torrents 方法")
+        logger.info(f"【{self.plugin_name}】返回方法对象：{result['search_torrents']}")
+        logger.info(f"【{self.plugin_name}】方法是否可调用：{callable(result['search_torrents'])}")
+        return result
 
     def search_torrents(
         self,
@@ -376,10 +379,16 @@ class ProwlarrIndexer(_PluginBase):
         Returns:
             List of TorrentInfo objects
         """
+        # CRITICAL: Log IMMEDIATELY at method entry - before ANY code
+        import sys
+        sys.stderr.write(f"=== PROWLARR search_torrents CALLED ===\n")
+        sys.stderr.flush()
+
         results = []
 
         # First line of the method - log immediately
         logger.info(f"【{self.plugin_name}】★★★ search_torrents 方法被调用 ★★★")
+        logger.info(f"【{self.plugin_name}】site={site}, keyword={keyword}")
 
         try:
             # Debug: Log method call with all parameters
