@@ -26,6 +26,7 @@ from app.log import logger
 from app.plugins import _PluginBase
 from app.schemas.types import MediaType
 from app.utils.http import RequestUtils
+from app.utils.string import StringUtils
 
 
 class ProwlarrIndexer(_PluginBase):
@@ -40,11 +41,11 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "Prowlarr索引器"
     plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "0.2.4"
+    plugin_version = "0.4.0"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "prowlarrindexer_"
-    plugin_order = 10
+    plugin_order = 15
     auth_level = 1
 
     # Private attributes
@@ -59,8 +60,9 @@ class ProwlarrIndexer(_PluginBase):
     _sites_helper: Optional[SitesHelper] = None
     _last_update: Optional[datetime] = None
 
-    # Domain prefix for indexer identification (using underscore like reference implementation)
-    DOMAIN_PREFIX = "prowlarr_indexer"
+    # Domain identifier for indexer (matching reference implementation pattern)
+    # Format: plugin_name.author
+    PROWLARR_DOMAIN = "prowlarr_indexer.claude"
 
     def init_plugin(self, config: dict = None):
         """
@@ -129,30 +131,31 @@ class ProwlarrIndexer(_PluginBase):
             logger.info(f"【{self.plugin_name}】开始获取索引器...")
             self._fetch_and_build_indexers()
 
-        # Register indexers to site management (delete and re-add to ensure latest config)
+        # IMPORTANT: Clean up old indexers first (one-time cleanup for v0.3.0)
+        # This ensures old站点 with incorrect structure are removed
+        for indexer in self._indexers:
+            domain = indexer.get("domain", "")
+            try:
+                if self._sites_helper.get_indexer(domain):
+                    self._sites_helper.delete_indexer(domain)
+                    logger.info(f"【{self.plugin_name}】清理旧站点：{indexer.get('name')} (domain: {domain})")
+            except Exception as e:
+                logger.debug(f"【{self.plugin_name}】清理站点失败（可能不存在）：{str(e)}")
+
+        # Register indexers to site management (matching reference implementation)
         registered_count = 0
-        updated_count = 0
         for indexer in self._indexers:
             domain = indexer.get("domain", "")
             site_info = self._sites_helper.get_indexer(domain)
-            new_indexer = copy.deepcopy(indexer)
-
-            if site_info:
-                # Site exists, delete and re-add to ensure latest fields
-                try:
-                    self._sites_helper.delete_indexer(domain)
-                    self._sites_helper.add_indexer(domain, new_indexer)
-                    logger.info(f"【{self.plugin_name}】🔄 更新站点管理：{indexer.get('name')} (domain: {domain})")
-                    updated_count += 1
-                except Exception as e:
-                    logger.error(f"【{self.plugin_name}】更新站点失败：{indexer.get('name')}, 错误：{str(e)}")
-            else:
-                # New site, add it
+            if not site_info:
+                new_indexer = copy.deepcopy(indexer)
                 self._sites_helper.add_indexer(domain, new_indexer)
                 logger.info(f"【{self.plugin_name}】✅ 新增到站点管理：{indexer.get('name')} (domain: {domain})")
                 registered_count += 1
+            else:
+                logger.debug(f"【{self.plugin_name}】站点已存在，跳过：{indexer.get('name')} (domain: {domain})")
 
-        logger.info(f"【{self.plugin_name}】插件初始化完成，总计 {len(self._indexers)} 个索引器，新增 {registered_count} 个，更新 {updated_count} 个")
+        logger.info(f"【{self.plugin_name}】插件初始化完成，总计 {len(self._indexers)} 个索引器，新增 {registered_count} 个")
 
     def _fetch_and_build_indexers(self) -> bool:
         """
@@ -284,24 +287,18 @@ class ProwlarrIndexer(_PluginBase):
         indexer_id = indexer.get("id")
         indexer_name = indexer.get("name", f"Indexer{indexer_id}")
 
-        # Build domain identifier (matching reference implementation pattern)
-        # Format: prowlarr_indexer.{indexer_id}
-        domain = f"{self.DOMAIN_PREFIX}.{indexer_id}"
+        # Build domain identifier (matching ProwlarrExtend reference implementation)
+        # Replace author part with indexer_id: "prowlarr_indexer.claude" -> "prowlarr_indexer.{indexer_id}"
+        domain = self.PROWLARR_DOMAIN.replace(self.plugin_author.lower(), str(indexer_id))
 
-        # Build simplified indexer dictionary (matching reference implementation)
-        # Only include fields that are in the reference implementation
-        # Note: url should be the main Prowlarr host, not the API endpoint
-        # This URL is used by MoviePilot for displaying site info, not for searching
+        # Build indexer dictionary (matching ProwlarrExtend reference implementation)
         return {
             "id": f"{self.plugin_name}-{indexer_name}",
             "name": f"{self.plugin_name}-{indexer_name}",
-            "url": self._host,  # Use Prowlarr host as the site URL
+            "url": f"{self._host.rstrip('/')}/api/v1/indexer/{indexer_id}",
             "domain": domain,
             "public": True,
-            "proxy": self._proxy,
-            "render": False,  # Don't use built-in rendering/parsing
-            "builtin": False,  # Mark as non-builtin indexer
-            "pri": 10,  # Priority
+            "proxy": False,
         }
 
     def get_state(self) -> bool:
@@ -350,13 +347,35 @@ class ProwlarrIndexer(_PluginBase):
             logger.debug(f"【{self.plugin_name}】get_module 被调用，但插件未启用，返回空字典")
             return {}
 
+        # Register BOTH search_torrents and async_search_torrents
+        # The system actually calls async_search_torrents
         result = {
             "search_torrents": self.search_torrents,
+            "async_search_torrents": self.async_search_torrents,
         }
-        logger.info(f"【{self.plugin_name}】get_module 被调用，注册 search_torrents 方法")
-        logger.info(f"【{self.plugin_name}】返回方法对象：{result['search_torrents']}")
-        logger.info(f"【{self.plugin_name}】方法是否可调用：{callable(result['search_torrents'])}")
+        logger.info(f"【{self.plugin_name}】get_module 被调用，注册 search_torrents 和 async_search_torrents 方法")
         return result
+
+    async def async_search_torrents(
+        self,
+        site: Dict[str, Any],
+        keyword: str,
+        mtype: Optional[MediaType] = None,
+        page: Optional[int] = 0
+    ) -> List[TorrentInfo]:
+        """
+        Async wrapper for search_torrents.
+        This is the actual method called by MoviePilot's async search system.
+        """
+        # CRITICAL: Log IMMEDIATELY at method entry
+        import sys
+        sys.stderr.write(f"=== PROWLARR async_search_torrents CALLED ===\n")
+        sys.stderr.flush()
+
+        logger.info(f"【{self.plugin_name}】★★★ async_search_torrents 方法被调用 ★★★")
+
+        # Delegate to synchronous implementation
+        return self.search_torrents(site, keyword, mtype, page)
 
     def search_torrents(
         self,
@@ -438,13 +457,14 @@ class ProwlarrIndexer(_PluginBase):
                 logger.warning(f"【{self.plugin_name}】站点缺少 domain 字段：{site_name}")
                 return results
 
-            # Parse indexer ID from domain (format: prowlarr_indexer.123)
-            # Use proper prefix removal to be consistent with jackettindexer
-            if not domain.startswith(f"{self.DOMAIN_PREFIX}."):
-                logger.warning(f"【{self.plugin_name}】domain格式不正确，应以 {self.DOMAIN_PREFIX}. 开头：{domain}")
+            # Extract indexer ID from domain (matching reference implementation)
+            # domain 格式: "prowlarr_indexer.{indexer_id}"
+            domain_url = StringUtils.get_url_domain(domain)
+            if not domain_url:
+                logger.warning(f"【{self.plugin_name}】无法解析domain：{domain}")
                 return results
 
-            indexer_id_str = domain[len(self.DOMAIN_PREFIX) + 1:]  # Remove prefix
+            indexer_id_str = domain_url.split(".")[-1]  # Take last part
             if not indexer_id_str or not indexer_id_str.isdigit():
                 logger.warning(f"【{self.plugin_name}】从domain提取的索引器ID无效：{domain} -> {indexer_id_str}")
                 return results
