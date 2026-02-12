@@ -272,9 +272,9 @@ class ProwlarrIndexer(_PluginBase):
         # Sanitize indexer_name for domain (remove spaces and special chars, convert to lowercase)
         indexer_name_slug = re.sub(r'[^a-z0-9]+', '-', indexer_name.lower()).strip('-')
 
-        # Build domain identifier with http:// prefix for MoviePilot compatibility
-        # Format: http://prowlarr.{indexer_name_slug}.indexer
-        domain = f"http://{self.DOMAIN_PREFIX}.{indexer_name_slug}.indexer"
+        # Build domain identifier - simple format without http:// and .indexer
+        # Format: prowlarr.{indexer_name_slug}
+        domain = f"{self.DOMAIN_PREFIX}.{indexer_name_slug}"
 
         # Build indexer dictionary with necessary fields for MoviePilot compatibility
         return {
