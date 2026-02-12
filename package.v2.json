@@ -1,30 +1,26 @@
 {
   "ProwlarrIndexer": {
-    "name": "ProwlarrIndexer",
-    "description": "聚合索引：通过 Prowlarr 检索站点资源",
-    "labels": "索引器,Prowlarr,Torznab",
-    "version": "0.3",
+    "name": "Prowlarr索引器",
+    "description": "集成Prowlarr索引器搜索，支持多站点统一搜索",
+    "labels": "indexer,prowlarr,torrent,search",
+    "version": "0.1.0",
     "icon": "Prowlarr.png",
-    "author": "prowlarr",
+    "author": "Claude",
     "level": 1,
     "history": {
-      "v0.3": "增加测试连接 API；完善日志输出；更新使用说明提示用户在搜索设置中勾选站点",
-      "v0.2": "修复搜索无结果：劫持 async_search_torrents；域名使用索引器名称替代数字 ID",
-      "v0.1": "初始版本，支持 Prowlarr JSON API 搜索，索引器自动发现与注册"
+      "v0.1.0": "初始版本发布，支持Prowlarr API搜索、自动同步索引器、分类过滤、定时同步"
     }
   },
   "JackettIndexer": {
-    "name": "JackettIndexer",
-    "description": "聚合索引：通过 Jackett 检索站点资源",
-    "labels": "索引器,Jackett,Torznab",
-    "version": "0.3",
+    "name": "Jackett索引器",
+    "description": "集成Jackett索引器搜索，支持Torznab协议多站点搜索",
+    "labels": "indexer,jackett,torrent,search,torznab",
+    "version": "0.1.0",
     "icon": "Jackett_A.png",
-    "author": "prowlarr",
+    "author": "Claude",
     "level": 1,
     "history": {
-      "v0.3": "修复 JSON 解析失败：使用 session 登录获取 cookies 认证；增强 JSON 解析兼容性；增加测试连接 API",
-      "v0.2": "修复索引器列表请求认证失败；劫持 async_search_torrents；域名使用索引器名称替代数字 ID",
-      "v0.1": "初始版本，支持 Jackett Torznab XML 搜索，索引器自动发现与注册"
+      "v0.1.0": "初始版本发布，支持Jackett Torznab API搜索、自动同步索引器、XML解析、定时同步"
     }
   }
 }

@@ -1,682 +1,857 @@
-# _*_ coding: utf-8 _*_
+# -*- coding: utf-8 -*-
 """
-MoviePilot 插件：ProwlarrIndexer
-通过 Prowlarr API 搜索资源，将结果以 TorrentInfo 列表返回给 MoviePilot。
-"""
-import copy
-import json
-import re
-import time
-import traceback
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import quote_plus, urlencode
+ProwlarrIndexer Plugin for MoviePilot
 
-import pytz
-import requests
+This plugin integrates Prowlarr indexer search functionality into MoviePilot.
+It allows searching across all indexers configured in Prowlarr through a unified interface.
+
+Version: 0.1.0
+Author: Claude
+"""
+
+import traceback
+from typing import List, Dict, Optional, Any, Tuple
+from datetime import datetime, timedelta
+from urllib.parse import urlencode
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app.core.config import settings
-from app.core.context import TorrentInfo
+from app.core.context import MediaInfo, TorrentInfo
+from app.core.metainfo import MetaInfo
 from app.helper.sites import SitesHelper
 from app.log import logger
 from app.plugins import _PluginBase
-from app.schemas import MediaType
+from app.schemas.types import MediaType
 from app.utils.http import RequestUtils
 
 
 class ProwlarrIndexer(_PluginBase):
     """
-    Prowlarr 索引器插件
-    通过 get_module() 劫持 search_torrents / async_search_torrents 方法，
-    将 Prowlarr 搜索结果注入 MoviePilot 搜索链。
+    Prowlarr Indexer Plugin
+
+    Provides torrent search functionality through Prowlarr API.
+    Registers all configured Prowlarr indexers as MoviePilot sites.
     """
 
-    # ==================== 插件元数据 ====================
-    plugin_name = "ProwlarrIndexer"
-    plugin_desc = "聚合索引：通过 Prowlarr 检索站点资源"
+    # Plugin metadata
+    plugin_name = "Prowlarr索引器"
+    plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "0.3"
-    plugin_author = "prowlarr"
-    author_url = "https://github.com/prowlarr"
-    plugin_config_prefix = "prowlarr_indexer_"
-    plugin_order = 16
+    plugin_version = "0.1.0"
+    plugin_author = "Claude"
+    author_url = "https://github.com"
+    plugin_config_prefix = "prowlarrindexer_"
+    plugin_order = 10
     auth_level = 1
 
-    # 域名标识前缀
-    _domain_prefix = "prowlarr_indexer"
+    # Private attributes
+    _enabled: bool = False
+    _host: str = ""
+    _api_key: str = ""
+    _proxy: bool = False
+    _cron: str = "0 0 */6 * *"  # Sync indexers every 6 hours
+    _onlyonce: bool = False
+    _indexers: List[Dict[str, Any]] = []
+    _scheduler: Optional[BackgroundScheduler] = None
+    _sites_helper: Optional[SitesHelper] = None
+    _last_update: Optional[datetime] = None
 
-    # ==================== 生命周期 ====================
-
-    def __init__(self):
-        super().__init__()
-        self._scheduler: Optional[BackgroundScheduler] = None
-        self._enabled: bool = False
-        self._host: str = ""
-        self._api_key: str = ""
-        self._proxy: bool = False
-        self._onlyonce: bool = False
-        self._cron: str = "0 0 */24 * *"
-        self._timeout: int = 30
-        self._max_retries: int = 3
-        self._indexers: list = []
-        self._indexer_map: dict = {}
-        self._sites_helper: Optional[SitesHelper] = None
+    # Domain prefix for indexer identification
+    DOMAIN_PREFIX = "prowlarr"
 
     def init_plugin(self, config: dict = None):
-        self._sites_helper = SitesHelper()
-        self._indexers = []
-        self._indexer_map = {}
+        """
+        Initialize the plugin with user configuration.
 
-        if config:
-            self._enabled = config.get("enabled", False)
-            self._host = self._normalize_host(config.get("host", ""))
-            self._api_key = config.get("api_key", "")
-            self._proxy = config.get("proxy", False)
-            self._onlyonce = config.get("onlyonce", False)
-            self._cron = config.get("cron") or "0 0 */24 * *"
-            self._timeout = int(config.get("timeout", 30))
-            self._max_retries = int(config.get("max_retries", 3))
+        Args:
+            config: Configuration dictionary from user settings
+        """
+        logger.info(f"【{self.plugin_name}】开始初始化插件...")
 
+        # Stop existing services
         self.stop_service()
 
+        # Load configuration
+        if config:
+            self._enabled = config.get("enabled", False)
+            self._host = config.get("host", "").rstrip("/")
+            self._api_key = config.get("api_key", "")
+            self._proxy = config.get("proxy", False)
+            self._cron = config.get("cron", "0 0 */6 * *")
+            self._onlyonce = config.get("onlyonce", False)
+
+        # Validate configuration
         if not self._enabled:
+            logger.info(f"【{self.plugin_name}】插件未启用")
             return
 
-        self._scheduler = BackgroundScheduler(timezone=settings.TZ)
+        if not self._host or not self._api_key:
+            logger.error(f"【{self.plugin_name}】配置错误：缺少服务器地址或API密钥")
+            return
+
+        # Validate host format
+        if not self._host.startswith(("http://", "https://")):
+            logger.error(f"【{self.plugin_name}】配置错误：服务器地址必须以 http:// 或 https:// 开头")
+            return
+
+        # Initialize sites helper
+        self._sites_helper = SitesHelper()
+
+        # Sync indexers immediately
+        logger.info(f"【{self.plugin_name}】开始同步索引器列表...")
+        if self._sync_indexers():
+            logger.info(f"【{self.plugin_name}】成功同步 {len(self._indexers)} 个索引器")
+        else:
+            logger.error(f"【{self.plugin_name}】同步索引器失败")
+            return
+
+        # Setup scheduler for periodic sync
         if self._cron:
-            logger.info(f"[{self.plugin_name}] 索引更新服务启动，周期：{self._cron}")
-            self._scheduler.add_job(self._refresh_indexers, CronTrigger.from_crontab(self._cron))
+            try:
+                self._scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
+                self._scheduler.add_job(
+                    func=self._sync_indexers,
+                    trigger=CronTrigger.from_crontab(self._cron),
+                    name=f"{self.plugin_name}定时同步"
+                )
+                self._scheduler.start()
+                logger.info(f"【{self.plugin_name}】定时同步任务已启动，周期：{self._cron}")
+            except Exception as e:
+                logger.error(f"【{self.plugin_name}】定时任务创建失败：{str(e)}")
 
+        # Handle run once flag
         if self._onlyonce:
-            logger.info(f"[{self.plugin_name}] 立即获取索引器列表")
-            self._scheduler.add_job(
-                self._refresh_indexers, "date",
-                run_date=datetime.now(tz=pytz.timezone(settings.TZ)) + timedelta(seconds=3),
-            )
             self._onlyonce = False
-            self._save_config()
+            self.update_config({
+                **config,
+                "onlyonce": False
+            })
+            logger.info(f"【{self.plugin_name}】立即运行完成，已关闭立即运行标志")
 
-        if self._scheduler.get_jobs():
-            self._scheduler.print_jobs()
-            self._scheduler.start()
+        logger.info(f"【{self.plugin_name}】插件初始化完成")
 
-        if not self._indexers:
-            self._refresh_indexers()
+    def _sync_indexers(self) -> bool:
+        """
+        Sync indexers from Prowlarr and register them as MoviePilot sites.
 
-        self._register_indexers()
+        Returns:
+            True if sync successful, False otherwise
+        """
+        try:
+            # Fetch indexers from Prowlarr
+            indexers = self._get_indexers_from_prowlarr()
+
+            if not indexers:
+                logger.warning(f"【{self.plugin_name}】未获取到索引器列表")
+                return False
+
+            # Unregister old indexers
+            if self._indexers:
+                for old_indexer in self._indexers:
+                    domain = old_indexer.get("domain")
+                    if domain:
+                        try:
+                            self._sites_helper.delete_indexer(domain)
+                        except Exception as e:
+                            logger.debug(f"【{self.plugin_name}】删除旧索引器失败 {domain}：{str(e)}")
+
+            # Register new indexers
+            self._indexers = []
+            for indexer in indexers:
+                try:
+                    indexer_dict = self._build_indexer_dict(indexer)
+                    domain = indexer_dict["domain"]
+
+                    # Register with sites helper
+                    self._sites_helper.add_indexer(domain, indexer_dict)
+                    self._indexers.append(indexer_dict)
+
+                    logger.debug(f"【{self.plugin_name}】已注册索引器：{indexer_dict['name']}")
+
+                except Exception as e:
+                    logger.error(f"【{self.plugin_name}】注册索引器失败：{str(e)}\n{traceback.format_exc()}")
+                    continue
+
+            self._last_update = datetime.now()
+            logger.info(f"【{self.plugin_name}】索引器同步完成，共 {len(self._indexers)} 个")
+            return True
+
+        except Exception as e:
+            logger.error(f"【{self.plugin_name}】同步索引器异常：{str(e)}\n{traceback.format_exc()}")
+            return False
+
+    def _get_indexers_from_prowlarr(self) -> List[Dict[str, Any]]:
+        """
+        Fetch indexer list from Prowlarr API.
+
+        Returns:
+            List of indexer dictionaries from Prowlarr API
+        """
+        try:
+            url = f"{self._host}/api/v1/indexer"
+            headers = {
+                "X-Api-Key": self._api_key,
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            }
+
+            logger.debug(f"【{self.plugin_name}】正在获取索引器列表：{url}")
+
+            response = RequestUtils(
+                headers=headers,
+                proxies=self._proxy
+            ).get_res(url, timeout=30)
+
+            if not response:
+                logger.error(f"【{self.plugin_name}】API请求失败：无响应")
+                return []
+
+            if response.status_code != 200:
+                logger.error(f"【{self.plugin_name}】API请求失败：HTTP {response.status_code}")
+                logger.debug(f"【{self.plugin_name}】响应内容：{response.text}")
+                return []
+
+            try:
+                indexers = response.json()
+            except Exception as e:
+                logger.error(f"【{self.plugin_name}】解析JSON失败：{str(e)}")
+                logger.debug(f"【{self.plugin_name}】响应内容：{response.text[:500]}")
+                return []
+
+            if not isinstance(indexers, list):
+                logger.error(f"【{self.plugin_name}】API返回格式错误：期望列表，得到 {type(indexers)}")
+                return []
+
+            # Filter enabled indexers only
+            enabled_indexers = [idx for idx in indexers if idx.get("enable", False)]
+            logger.info(f"【{self.plugin_name}】获取到 {len(enabled_indexers)} 个启用的索引器（总计 {len(indexers)} 个）")
+
+            return enabled_indexers
+
+        except Exception as e:
+            logger.error(f"【{self.plugin_name}】获取索引器列表异常：{str(e)}\n{traceback.format_exc()}")
+            return []
+
+    def _build_indexer_dict(self, indexer: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Build MoviePilot indexer dictionary from Prowlarr indexer data.
+
+        Args:
+            indexer: Prowlarr indexer dictionary
+
+        Returns:
+            MoviePilot compatible indexer dictionary
+        """
+        indexer_id = indexer.get("id")
+        indexer_name = indexer.get("name", f"Indexer{indexer_id}")
+
+        # Build domain identifier (used for routing)
+        domain = f"http://{self.DOMAIN_PREFIX}-{indexer_name.lower().replace(' ', '-')}.indexer"
+
+        # Build complete indexer dictionary
+        return {
+            "id": f"{self.plugin_name}-{indexer_id}",
+            "name": f"{self.plugin_name}-{indexer_name}",
+            "domain": domain,
+            "url": self._host,
+            "indexer_id": indexer_id,  # Store original Prowlarr ID
+            "indexer_name": indexer_name,
+            "public": indexer.get("privacy", "") == "public",
+            "proxy": self._proxy,
+            "priority": indexer.get("priority", 25),
+            "language": indexer.get("language", ["en-US"]),
+            "protocol": indexer.get("protocol", "torrent"),
+            # Add torrents structure to prevent spider crashes
+            "torrents": {
+                "list": {
+                    "selector": "",  # Not used for API-based indexers
+                }
+            },
+            "parser": {
+                "enabled": False  # API-based, no HTML parsing needed
+            }
+        }
 
     def get_state(self) -> bool:
+        """
+        Get plugin enabled state.
+
+        Returns:
+            True if plugin is enabled, False otherwise
+        """
         return self._enabled
 
     def stop_service(self):
+        """
+        Stop plugin services and cleanup resources.
+        """
         try:
+            # Stop scheduler
             if self._scheduler:
-                self._scheduler.remove_all_jobs()
-                if self._scheduler.running:
-                    self._scheduler.shutdown()
-                self._scheduler = None
-        except Exception as e:
-            logger.error(f"[{self.plugin_name}] 停止服务出错: {e}")
+                try:
+                    self._scheduler.remove_all_jobs()
+                    if self._scheduler.running:
+                        self._scheduler.shutdown(wait=False)
+                    self._scheduler = None
+                    logger.info(f"【{self.plugin_name}】定时任务已停止")
+                except Exception as e:
+                    logger.error(f"【{self.plugin_name}】停止定时任务失败：{str(e)}")
 
-    # ==================== 模块劫持 ====================
+            # Unregister indexers
+            if self._indexers and self._sites_helper:
+                for indexer in self._indexers:
+                    domain = indexer.get("domain")
+                    if domain:
+                        try:
+                            self._sites_helper.delete_indexer(domain)
+                        except Exception as e:
+                            logger.debug(f"【{self.plugin_name}】删除索引器失败 {domain}：{str(e)}")
+
+                logger.info(f"【{self.plugin_name}】已注销 {len(self._indexers)} 个索引器")
+                self._indexers = []
+
+        except Exception as e:
+            logger.error(f"【{self.plugin_name}】停止服务异常：{str(e)}")
 
     def get_module(self) -> Dict[str, Any]:
+        """
+        Declare module methods to hijack system search.
+
+        Returns:
+            Dictionary mapping method names to plugin methods
+        """
         return {
             "search_torrents": self.search_torrents,
-            "async_search_torrents": self.async_search_torrents,
         }
-
-    async def async_search_torrents(
-        self,
-        site: dict,
-        keyword: str = None,
-        mtype: Optional[MediaType] = None,
-        page: Optional[int] = 0,
-    ) -> List[TorrentInfo]:
-        """
-        异步搜索入口，MoviePilot 搜索链实际调用此方法。
-        """
-        return self.search_torrents(site=site, keyword=keyword, mtype=mtype, page=page)
-
-    # ==================== 搜索逻辑 ====================
 
     def search_torrents(
         self,
-        site: dict,
-        keyword: str = None,
+        site: Dict[str, Any],
+        keyword: str,
         mtype: Optional[MediaType] = None,
-        page: Optional[int] = 0,
+        page: Optional[int] = 0
     ) -> List[TorrentInfo]:
         """
-        MoviePilot 搜索链回调。仅处理本插件注册的站点。
+        Search torrents through Prowlarr API.
+
+        This method is called by MoviePilot's module hijacking system.
+
+        Args:
+            site: Site/indexer information dictionary
+            keyword: Search keyword
+            mtype: Media type (MOVIE or TV)
+            page: Page number for pagination
+
+        Returns:
+            List of TorrentInfo objects
         """
-        if not site or not keyword:
-            return []
-        site_name = site.get("name", "")
-        if not site_name.startswith(self.plugin_name):
-            return []
+        results = []
 
-        logger.info(f"[{self.plugin_name}] 搜索 -> 站点: {site_name}, "
-                     f"关键词: {keyword}, 类型: {mtype}, 页码: {page}")
+        try:
+            # Validate inputs
+            if not site or not keyword:
+                logger.debug(f"【{self.plugin_name}】搜索参数无效：site={site}, keyword={keyword}")
+                return []
 
-        indexer_id = self._extract_indexer_id(site)
-        if not indexer_id:
-            logger.warning(f"[{self.plugin_name}] 无法提取 indexer ID: {site_name}, "
-                           f"domain={site.get('domain')}, map_keys={list(self._indexer_map.keys())}")
-            return []
+            # Check if this site belongs to our plugin
+            site_name = site.get("name", "")
+            if not site_name.startswith(self.plugin_name):
+                # Not our site, return empty to let other plugins handle
+                return []
 
-        headers = self._build_headers()
+            # Extract indexer information
+            domain = site.get("domain")
+            if not domain:
+                logger.error(f"【{self.plugin_name}】站点缺少 domain 字段：{site_name}")
+                return []
+
+            # Parse indexer ID from domain
+            # Domain format: http://prowlarr-indexername.indexer
+            try:
+                indexer_id = site.get("indexer_id")
+                if not indexer_id:
+                    logger.error(f"【{self.plugin_name}】站点缺少 indexer_id：{site_name}")
+                    return []
+            except Exception as e:
+                logger.error(f"【{self.plugin_name}】解析索引器ID失败：{str(e)}")
+                return []
+
+            logger.info(f"【{self.plugin_name}】开始搜索：站点={site_name}, 关键词={keyword}, 类型={mtype}, 页码={page}")
+
+            # Build search parameters
+            search_params = self._build_search_params(
+                keyword=keyword,
+                indexer_id=indexer_id,
+                mtype=mtype,
+                page=page
+            )
+
+            # Execute search API call
+            api_results = self._search_prowlarr_api(search_params)
+
+            # Parse results to TorrentInfo
+            for item in api_results:
+                try:
+                    torrent_info = self._parse_torrent_info(item, site_name)
+                    if torrent_info:
+                        results.append(torrent_info)
+                except Exception as e:
+                    logger.error(f"【{self.plugin_name}】解析种子信息失败：{str(e)}")
+                    continue
+
+            logger.info(f"【{self.plugin_name}】搜索完成：{site_name} 返回 {len(results)} 个结果")
+
+        except Exception as e:
+            logger.error(f"【{self.plugin_name}】搜索异常：{str(e)}\n{traceback.format_exc()}")
+
+        return results
+
+    def _build_search_params(
+        self,
+        keyword: str,
+        indexer_id: int,
+        mtype: Optional[MediaType] = None,
+        page: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Build Prowlarr API search parameters.
+
+        Args:
+            keyword: Search keyword
+            indexer_id: Prowlarr indexer ID
+            mtype: Media type for category filtering
+            page: Page number
+
+        Returns:
+            Dictionary of search parameters
+        """
+        # Determine categories based on media type
         categories = self._get_categories(mtype)
 
-        # Prowlarr 要求 categories 参数重复传递，而非逗号分隔
+        # Build parameter list (supports multiple category parameters)
         params = [
             ("query", keyword),
             ("indexerIds", indexer_id),
             ("type", "search"),
-            ("limit", 150),
-            ("offset", (page or 0) * 150),
-        ] + [("categories", c) for c in categories]
+            ("limit", 100),
+            ("offset", page * 100 if page else 0),
+        ]
 
-        query_string = urlencode(params, quote_via=quote_plus)
-        api_url = f"{self._host}/api/v1/search?{query_string}"
-        logger.info(f"[{self.plugin_name}] 请求 Prowlarr: {api_url}")
+        # Add category parameters
+        for cat in categories:
+            params.append(("categories", cat))
 
-        response = self._request_with_retry(api_url, headers=headers)
-        if not response:
-            return []
-
-        try:
-            data = response.json()
-        except Exception as e:
-            logger.error(f"[{self.plugin_name}] JSON 解析失败: {e}")
-            return []
-
-        if not isinstance(data, list):
-            logger.warning(f"[{self.plugin_name}] 返回非列表数据")
-            return []
-
-        results = []
-        for entry in data:
-            if not entry or not isinstance(entry, dict):
-                continue
-            try:
-                title = entry.get("title")
-                enclosure = entry.get("downloadUrl") or entry.get("magnetUrl")
-                if not title or not enclosure:
-                    continue
-                torrent = TorrentInfo(
-                    site_name=site_name,
-                    title=title,
-                    description=entry.get("sortTitle") or "",
-                    enclosure=enclosure,
-                    page_url=entry.get("infoUrl") or entry.get("commentUrl") or entry.get("guid", ""),
-                    size=entry.get("size", 0),
-                    seeders=entry.get("seeders", 0),
-                    peers=entry.get("leechers") or entry.get("peers", 0),
-                    grabs=entry.get("grabs", 0),
-                    pubdate=entry.get("publishDate", ""),
-                    imdbid=self._extract_imdb(entry),
-                    downloadvolumefactor=self._parse_download_factor(entry),
-                    uploadvolumefactor=self._parse_upload_factor(entry),
-                )
-                results.append(torrent)
-            except Exception as e:
-                logger.debug(f"[{self.plugin_name}] 解析条目出错: {e}")
-
-        logger.info(f"[{self.plugin_name}] {site_name} 返回 {len(results)} 条资源")
-        return results
-
-    # ==================== 索引器管理 ====================
-
-    def _refresh_indexers(self):
-        if not self._api_key or not self._host:
-            logger.warning(f"[{self.plugin_name}] 地址或 API Key 未配置")
-            return
-
-        headers = self._build_headers()
-        url = f"{self._host}/api/v1/indexer"
-        logger.info(f"[{self.plugin_name}] 索引器列表请求: {url}")
-
-        response = self._request_with_retry(url, headers=headers)
-        if not response:
-            return
-
-        try:
-            data = response.json()
-        except Exception as e:
-            logger.error(f"[{self.plugin_name}] 索引器响应解析失败: {e}")
-            return
-
-        if not isinstance(data, list):
-            logger.warning(f"[{self.plugin_name}] 返回数据格式不正确")
-            return
-
-        self._indexers = []
-        self._indexer_map = {}
-        for v in data:
-            indexer_id = v.get("id")
-            indexer_name = v.get("name")
-            if not indexer_id or not indexer_name:
-                continue
-            if not v.get("enable", True):
-                continue
-            if not v.get("supportsSearch", True):
-                continue
-
-            safe_name = self._sanitize_name(indexer_name)
-            self._indexer_map[safe_name] = indexer_id
-
-            self._indexers.append({
-                "id": f"{self.plugin_name}-{indexer_name}",
-                "name": f"{self.plugin_name}-{indexer_name}",
-                "domain": f"{self._domain_prefix}.{safe_name}",
-                "url": f"{self._host}/api/v1/indexer/{indexer_id}",
-                "public": v.get("privacy", "public") == "public",
-                "proxy": self._proxy,
-                "language": v.get("language", ""),
-                "torrents": {"list": {}, "fields": {}},
-            })
-
-        logger.info(f"[{self.plugin_name}] 获取到 {len(self._indexers)} 个索引器")
-        for idx in self._indexers:
-            logger.info(f"[{self.plugin_name}]   - {idx['name']} (id={idx['id']}, domain={idx['domain']})")
-
-    def _register_indexers(self):
-        if not self._sites_helper:
-            return
-        for indexer in self._indexers:
-            domain = indexer.get("domain", "")
-            if not domain:
-                continue
-            existing = self._sites_helper.get_indexer(domain)
-            if not existing:
-                self._sites_helper.add_indexer(domain, copy.deepcopy(indexer))
-                logger.info(f"[{self.plugin_name}] 注册索引器: {indexer.get('name')} -> {domain}")
-            else:
-                logger.debug(f"[{self.plugin_name}] 索引器已存在: {domain}")
-
-    # ==================== 测试连接 ====================
-
-    def _test_connection(self) -> dict:
-        """测试 Prowlarr 连接，返回状态信息"""
-        if not self._host or not self._api_key:
-            return {"status": "error", "message": "地址或 API Key 未配置"}
-
-        headers = self._build_headers()
-        url = f"{self._host}/api/v1/indexer"
-
-        try:
-            ret = RequestUtils(headers=headers, timeout=self._timeout).get_res(
-                url, proxies=settings.PROXY if self._proxy else None
-            )
-        except Exception as e:
-            return {"status": "error", "message": f"连接异常: {e}"}
-
-        if not ret:
-            return {"status": "error", "message": "无响应"}
-        if ret.status_code == 401:
-            return {"status": "error", "message": "API Key 无效 (401)"}
-        if ret.status_code != 200:
-            return {"status": "error", "message": f"HTTP {ret.status_code}"}
-
-        try:
-            data = ret.json()
-            count = len(data) if isinstance(data, list) else 0
-            return {"status": "ok", "message": f"连接成功，发现 {count} 个索引器"}
-        except Exception as e:
-            return {"status": "error", "message": f"JSON 解析失败: {e}"}
-
-    # ==================== HTTP 工具 ====================
-
-    def _build_headers(self) -> dict:
-        return {
-            "Content-Type": "application/json",
-            "User-Agent": settings.USER_AGENT,
-            "X-Api-Key": self._api_key,
-            "Accept": "application/json",
-        }
-
-    def _request_with_retry(self, url: str, headers: Optional[dict] = None) -> Optional[requests.Response]:
-        proxies = settings.PROXY if self._proxy else None
-        last_error = None
-
-        for attempt in range(1, self._max_retries + 1):
-            try:
-                logger.debug(f"[{self.plugin_name}] HTTP GET (第{attempt}次): {url}")
-                ret = RequestUtils(headers=headers, timeout=self._timeout).get_res(url, proxies=proxies)
-                if ret is not None:
-                    logger.debug(f"[{self.plugin_name}] 状态码: {ret.status_code}")
-                    if ret.status_code == 200:
-                        return ret
-                    if ret.status_code == 401:
-                        logger.error(f"[{self.plugin_name}] API Key 无效或未授权")
-                        return None
-                    logger.warning(f"[{self.plugin_name}] HTTP {ret.status_code} (第{attempt}次)")
-                else:
-                    logger.warning(f"[{self.plugin_name}] 无响应 (第{attempt}次)")
-            except Exception as e:
-                last_error = e
-                logger.warning(f"[{self.plugin_name}] 请求异常 (第{attempt}次): {e}")
-
-            if attempt < self._max_retries:
-                wait = 2 ** attempt
-                logger.debug(f"[{self.plugin_name}] {wait}秒后重试...")
-                time.sleep(wait)
-
-        logger.error(f"[{self.plugin_name}] 请求失败，已重试 {self._max_retries} 次: {url}"
-                     + (f" 最后错误: {last_error}" if last_error else ""))
-        return None
-
-    # ==================== 辅助方法 ====================
+        return params
 
     @staticmethod
-    def _normalize_host(host: str) -> str:
-        if not host:
-            return ""
-        host = host.strip()
-        if not host.startswith("http"):
-            host = "http://" + host
-        return host.rstrip("/")
+    def _get_categories(mtype: Optional[MediaType] = None) -> List[int]:
+        """
+        Get Torznab category IDs based on media type.
 
-    @staticmethod
-    def _get_categories(mtype: Optional[MediaType] = None) -> list:
+        Args:
+            mtype: Media type (MOVIE, TV, or None for all)
+
+        Returns:
+            List of category IDs
+        """
         if not mtype:
+            return [2000, 5000]  # Both movies and TV
+        elif mtype == MediaType.MOVIE:
+            return [2000]  # Movies
+        elif mtype == MediaType.TV:
+            return [5000]  # TV shows
+        else:
             return [2000, 5000]
-        if mtype == MediaType.MOVIE:
-            return [2000]
-        if mtype == MediaType.TV:
-            return [5000]
-        return [2000, 5000]
+
+    def _search_prowlarr_api(self, params: List[Tuple[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Execute Prowlarr API search request.
+
+        Args:
+            params: List of (key, value) tuples for query parameters
+
+        Returns:
+            List of torrent dictionaries from API response
+        """
+        try:
+            # Build URL with query string
+            query_string = urlencode(params)
+            url = f"{self._host}/api/v1/search?{query_string}"
+
+            headers = {
+                "X-Api-Key": self._api_key,
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            }
+
+            logger.debug(f"【{self.plugin_name}】API请求：{url}")
+
+            response = RequestUtils(
+                headers=headers,
+                proxies=self._proxy
+            ).get_res(url, timeout=60)
+
+            if not response:
+                logger.error(f"【{self.plugin_name}】搜索API请求失败：无响应")
+                return []
+
+            if response.status_code != 200:
+                logger.error(f"【{self.plugin_name}】搜索API请求失败：HTTP {response.status_code}")
+                logger.debug(f"【{self.plugin_name}】响应内容：{response.text}")
+                return []
+
+            try:
+                data = response.json()
+            except Exception as e:
+                logger.error(f"【{self.plugin_name}】解析搜索结果JSON失败：{str(e)}")
+                return []
+
+            if not isinstance(data, list):
+                logger.error(f"【{self.plugin_name}】API返回格式错误：期望列表，得到 {type(data)}")
+                return []
+
+            return data
+
+        except Exception as e:
+            logger.error(f"【{self.plugin_name}】搜索API异常：{str(e)}\n{traceback.format_exc()}")
+            return []
+
+    def _parse_torrent_info(self, item: Dict[str, Any], site_name: str) -> Optional[TorrentInfo]:
+        """
+        Parse Prowlarr API response item to TorrentInfo object.
+
+        Args:
+            item: Single torrent item from API response
+            site_name: Site name for attribution
+
+        Returns:
+            TorrentInfo object or None if parsing fails
+        """
+        try:
+            # Extract required fields
+            title = item.get("title", "")
+            if not title:
+                logger.debug(f"【{self.plugin_name}】跳过无标题的结果")
+                return None
+
+            # Get download URL (prefer direct download over magnet)
+            enclosure = item.get("downloadUrl") or item.get("magnetUrl", "")
+            if not enclosure:
+                logger.debug(f"【{self.plugin_name}】跳过无下载链接的结果：{title}")
+                return None
+
+            # Build TorrentInfo object
+            torrent = TorrentInfo(
+                title=title,
+                enclosure=enclosure,
+                description=item.get("sortTitle", ""),
+                size=item.get("size", 0),
+                seeders=item.get("seeders", 0),
+                peers=item.get("leechers", 0),
+                page_url=item.get("infoUrl") or item.get("guid", ""),
+                site_name=site_name,
+                pubdate=self._parse_publish_date(item.get("publishDate", "")),
+                imdbid=self._format_imdb_id(item.get("imdbId")),
+                downloadvolumefactor=0.0 if item.get("indexerFlags", 0) & 1 else 1.0,  # Freeleech flag
+                uploadvolumefactor=1.0,
+                grabs=item.get("grabs", 0),
+            )
+
+            return torrent
+
+        except Exception as e:
+            logger.error(f"【{self.plugin_name}】解析种子信息异常：{str(e)}")
+            return None
 
     @staticmethod
-    def _sanitize_name(name: str) -> str:
-        """将索引器名称转为安全的域名片段"""
-        s = re.sub(r'[^a-zA-Z0-9_-]', '_', name.strip().lower())
-        s = re.sub(r'_+', '_', s).strip('_')
-        return s or "unknown"
+    def _parse_publish_date(date_str: str) -> str:
+        """
+        Parse ISO 8601 date string to MoviePilot format.
 
-    def _extract_indexer_id(self, site: dict) -> str:
-        """域名格式: prowlarr_indexer.<sanitized_name>，通过 _indexer_map 映射回真实 ID"""
-        domain = site.get("domain", "")
-        if not domain:
+        Args:
+            date_str: ISO 8601 date string (e.g., "2023-06-15T12:34:56Z")
+
+        Returns:
+            Formatted date string (YYYY-MM-DD HH:MM:SS)
+        """
+        try:
+            if not date_str:
+                return ""
+
+            # Parse ISO 8601 format
+            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+
+            # Format to MoviePilot standard
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        except Exception:
+            return date_str  # Return original if parsing fails
+
+    @staticmethod
+    def _format_imdb_id(imdb_id: Any) -> str:
+        """
+        Format IMDB ID to standard tt prefix format.
+
+        Args:
+            imdb_id: IMDB ID (integer or string)
+
+        Returns:
+            Formatted IMDB ID string (e.g., "tt0137523")
+        """
+        try:
+            if not imdb_id:
+                return ""
+
+            # Convert to string
+            imdb_str = str(imdb_id)
+
+            # Add tt prefix if missing
+            if not imdb_str.startswith("tt"):
+                imdb_str = f"tt{imdb_str}"
+
+            return imdb_str
+
+        except Exception:
             return ""
-        parts = domain.split(".", 1)
-        if len(parts) < 2:
-            return ""
-        key = parts[1]
-        return str(self._indexer_map.get(key, ""))
-
-    @staticmethod
-    def _extract_imdb(entry: dict) -> str:
-        imdb_id = entry.get("imdbId")
-        if imdb_id and isinstance(imdb_id, int) and imdb_id > 0:
-            return f"tt{imdb_id:07d}"
-        return ""
-
-    @staticmethod
-    def _parse_download_factor(entry: dict) -> Optional[float]:
-        flags = entry.get("indexerFlags") or []
-        if isinstance(flags, list):
-            for flag in flags:
-                s = str(flag).lower()
-                if "freeleech" in s:
-                    return 0.0
-                if "halfleech" in s:
-                    return 0.5
-        return None
-
-    @staticmethod
-    def _parse_upload_factor(entry: dict) -> Optional[float]:
-        flags = entry.get("indexerFlags") or []
-        if isinstance(flags, list):
-            for flag in flags:
-                if "doubleupload" in str(flag).lower():
-                    return 2.0
-        return None
-
-    def _save_config(self):
-        self.update_config({
-            "enabled": self._enabled,
-            "host": self._host,
-            "api_key": self._api_key,
-            "proxy": self._proxy,
-            "onlyonce": self._onlyonce,
-            "cron": self._cron,
-            "timeout": self._timeout,
-            "max_retries": self._max_retries,
-        })
-
-    # ==================== 插件接口 ====================
-
-    @staticmethod
-    def get_command() -> List[Dict[str, Any]]:
-        return []
-
-    def get_api(self) -> List[Dict[str, Any]]:
-        return [{
-            "path": "/test",
-            "endpoint": self._test_connection,
-            "methods": ["GET"],
-            "summary": "测试 Prowlarr 连接",
-        }]
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
+        """
+        Get plugin configuration form for web UI.
+
+        Returns:
+            Tuple of (form_elements, default_config)
+        """
         return [
             {
-                "component": "VForm",
-                "content": [
+                'component': 'VForm',
+                'content': [
                     {
-                        "component": "VRow",
-                        "content": [
+                        'component': 'VRow',
+                        'content': [
                             {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
-                                "content": [{
-                                    "component": "VSwitch",
-                                    "props": {"model": "enabled", "label": "启用插件"},
-                                }],
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 6},
+                                'content': [
+                                    {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'enabled',
+                                            'label': '启用插件',
+                                            'hint': '开启后将使用Prowlarr进行搜索',
+                                            'persistent-hint': True
+                                        }
+                                    }
+                                ]
                             },
                             {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
-                                "content": [{
-                                    "component": "VSwitch",
-                                    "props": {"model": "proxy", "label": "使用代理"},
-                                }],
-                            },
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
-                                "content": [{
-                                    "component": "VSwitch",
-                                    "props": {
-                                        "model": "onlyonce",
-                                        "label": "立即刷新索引",
-                                        "hint": "打开后立即获取索引器列表",
-                                    },
-                                }],
-                            },
-                        ],
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 6},
+                                'content': [
+                                    {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'onlyonce',
+                                            'label': '立即运行一次',
+                                            'hint': '插件将立即同步索引器列表',
+                                            'persistent-hint': True
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
                     },
                     {
-                        "component": "VRow",
-                        "content": [
+                        'component': 'VRow',
+                        'content': [
                             {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
-                                "content": [{
-                                    "component": "VTextField",
-                                    "props": {
-                                        "model": "host",
-                                        "label": "Prowlarr 地址",
-                                        "placeholder": "http://127.0.0.1:9696",
-                                        "hint": "Prowlarr 访问地址",
-                                    },
-                                }],
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 6},
+                                'content': [
+                                    {
+                                        'component': 'VTextField',
+                                        'props': {
+                                            'model': 'host',
+                                            'label': '服务器地址',
+                                            'placeholder': 'http://127.0.0.1:9696',
+                                            'hint': 'Prowlarr服务器地址，如：http://127.0.0.1:9696',
+                                            'persistent-hint': True
+                                        }
+                                    }
+                                ]
                             },
                             {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
-                                "content": [{
-                                    "component": "VTextField",
-                                    "props": {
-                                        "model": "api_key",
-                                        "label": "API Key",
-                                        "hint": "Settings -> General -> Security -> API Key",
-                                    },
-                                }],
-                            },
-                        ],
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 6},
+                                'content': [
+                                    {
+                                        'component': 'VTextField',
+                                        'props': {
+                                            'model': 'api_key',
+                                            'label': 'API密钥',
+                                            'placeholder': '',
+                                            'hint': '在Prowlarr设置→通用→安全→API密钥中获取',
+                                            'persistent-hint': True,
+                                            'type': 'password'
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
                     },
                     {
-                        "component": "VRow",
-                        "content": [
+                        'component': 'VRow',
+                        'content': [
                             {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
-                                "content": [{
-                                    "component": "VTextField",
-                                    "props": {
-                                        "model": "cron",
-                                        "label": "索引更新周期",
-                                        "placeholder": "0 0 */24 * *",
-                                        "hint": "Cron 表达式，默认每24小时",
-                                    },
-                                }],
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 6},
+                                'content': [
+                                    {
+                                        'component': 'VTextField',
+                                        'props': {
+                                            'model': 'cron',
+                                            'label': '同步周期',
+                                            'placeholder': '0 0 */6 * *',
+                                            'hint': 'Cron表达式，默认每6小时同步一次索引器',
+                                            'persistent-hint': True
+                                        }
+                                    }
+                                ]
                             },
                             {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
-                                "content": [{
-                                    "component": "VTextField",
-                                    "props": {
-                                        "model": "timeout",
-                                        "label": "超时(秒)",
-                                        "type": "number",
-                                        "placeholder": "30",
-                                    },
-                                }],
-                            },
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
-                                "content": [{
-                                    "component": "VTextField",
-                                    "props": {
-                                        "model": "max_retries",
-                                        "label": "重试次数",
-                                        "type": "number",
-                                        "placeholder": "3",
-                                    },
-                                }],
-                            },
-                        ],
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 6},
+                                'content': [
+                                    {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'proxy',
+                                            'label': '使用代理',
+                                            'hint': '访问Prowlarr时使用系统代理',
+                                            'persistent-hint': True
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
                     },
                     {
-                        "component": "VRow",
-                        "content": [{
-                            "component": "VCol",
-                            "props": {"cols": 12},
-                            "content": [{
-                                "component": "VAlert",
-                                "props": {
-                                    "type": "info",
-                                    "variant": "tonal",
-                                    "text": "使用说明：\n"
-                                            "1. 填写 Prowlarr 地址和 API Key，开启「立即刷新索引」\n"
-                                            "2. 在「查看数据」页面查看已注册的索引器及其 ID\n"
-                                            "3. 到 MoviePilot「搜索设置」中勾选以 ProwlarrIndexer 开头的站点\n"
-                                            "4. 若更新插件后域名变更，需重新在搜索设置中勾选\n"
-                                            "5. 可通过 API /test 测试连接：/api/v1/plugin/ProwlarrIndexer/test",
-                                },
-                            }],
-                        }],
-                    },
-                ],
+                        'component': 'VRow',
+                        'content': [
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12},
+                                'content': [
+                                    {
+                                        'component': 'VAlert',
+                                        'props': {
+                                            'type': 'info',
+                                            'variant': 'tonal',
+                                            'text': '插件将自动同步Prowlarr中已启用的索引器，每个索引器将注册为一个站点。搜索时将通过Prowlarr API进行查询。'
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
             }
         ], {
             "enabled": False,
             "host": "",
             "api_key": "",
             "proxy": False,
-            "onlyonce": False,
-            "cron": "0 0 */24 * *",
-            "timeout": 30,
-            "max_retries": 3,
+            "cron": "0 0 */6 * *",
+            "onlyonce": False
         }
 
     def get_page(self) -> List[dict]:
-        if not self._indexers:
-            self._refresh_indexers()
-        if not self._indexers:
-            return [{
-                "component": "VRow",
-                "content": [{
-                    "component": "VCol",
-                    "props": {"cols": 12},
-                    "content": [{
-                        "component": "VAlert",
-                        "props": {
-                            "type": "warning",
-                            "variant": "tonal",
-                            "text": "未获取到任何索引器，请检查配置后点击「立即刷新索引」",
-                        },
-                    }],
-                }],
-            }]
+        """
+        Get plugin detail page for web UI.
 
-        rows = []
-        for site in self._indexers:
-            rows.append({
-                "component": "tr",
-                "content": [
-                    {"component": "td", "text": site.get("id", "")},
-                    {"component": "td", "text": site.get("name", "")},
-                    {"component": "td", "text": f"https://{site.get('domain', '')}"},
-                    {"component": "td", "text": "是" if site.get("public") else "否"},
-                ],
-            })
+        Returns:
+            List of page elements
+        """
+        # Build indexer status table
+        indexer_rows = []
 
-        return [{
-            "component": "VRow",
-            "content": [{
-                "component": "VCol",
-                "props": {"cols": 12},
-                "content": [{
-                    "component": "VAlert",
-                    "props": {
-                        "type": "success",
-                        "variant": "tonal",
-                        "text": f"已注册 {len(self._indexers)} 个索引器。"
-                                f"请到「搜索设置」中勾选以 ProwlarrIndexer 开头的站点。",
-                    },
-                }],
-            }],
-        }, {
-            "component": "VRow",
-            "content": [{
-                "component": "VCol",
-                "props": {"cols": 12},
-                "content": [{
-                    "component": "VTable",
-                    "props": {"hover": True},
-                    "content": [
-                        {
-                            "component": "thead",
-                            "content": [{
-                                "component": "tr",
-                                "content": [
-                                    {"component": "th", "props": {"class": "text-start ps-4"}, "text": "站点 ID"},
-                                    {"component": "th", "props": {"class": "text-start ps-4"}, "text": "索引器名称"},
-                                    {"component": "th", "props": {"class": "text-start ps-4"}, "text": "站点 Domain"},
-                                    {"component": "th", "props": {"class": "text-start ps-4"}, "text": "公开"},
-                                ],
-                            }],
-                        },
-                        {"component": "tbody", "content": rows},
-                    ],
-                }],
-            }],
-        }]
+        if self._indexers:
+            for indexer in self._indexers:
+                indexer_rows.append({
+                    'name': indexer.get('indexer_name', 'Unknown'),
+                    'id': indexer.get('indexer_id', 'N/A'),
+                    'protocol': indexer.get('protocol', 'torrent'),
+                    'public': '是' if indexer.get('public', False) else '否',
+                    'priority': indexer.get('priority', 25),
+                })
+
+        # Build status info
+        status_info = []
+
+        if self._enabled:
+            status_info.append('状态：运行中')
+        else:
+            status_info.append('状态：已停用')
+
+        if self._last_update:
+            status_info.append(f'最后同步：{self._last_update.strftime("%Y-%m-%d %H:%M:%S")}')
+
+        status_info.append(f'索引器数量：{len(self._indexers)}')
+
+        # Build page elements
+        return [
+            {
+                'component': 'VRow',
+                'content': [
+                    {
+                        'component': 'VCol',
+                        'props': {'cols': 12},
+                        'content': [
+                            {
+                                'component': 'VAlert',
+                                'props': {
+                                    'type': 'success' if self._enabled else 'info',
+                                    'variant': 'tonal',
+                                    'text': ' | '.join(status_info)
+                                }
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                'component': 'VRow',
+                'content': [
+                    {
+                        'component': 'VCol',
+                        'props': {'cols': 12},
+                        'content': [
+                            {
+                                'component': 'VTable',
+                                'props': {
+                                    'hover': True,
+                                    'density': 'compact',
+                                    'headers': [
+                                        {'title': '索引器名称', 'key': 'name'},
+                                        {'title': 'ID', 'key': 'id'},
+                                        {'title': '协议', 'key': 'protocol'},
+                                        {'title': '公开', 'key': 'public'},
+                                        {'title': '优先级', 'key': 'priority'},
+                                    ],
+                                    'items': indexer_rows
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+
+    def get_api(self) -> List[Dict[str, Any]]:
+        """
+        Get plugin API endpoints.
+
+        Returns:
+            List of API endpoint definitions
+        """
+        return []
