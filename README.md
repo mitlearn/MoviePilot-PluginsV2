@@ -378,6 +378,7 @@ docker restart moviepilot
 
 | 版本 | 日期 | 更新内容 |
 |------|------|----------|
+| 0.1.5 | 2026-02-12 | 修复站点可见性：优先使用add_site；添加active/limit字段；强制public=true |
 | 0.1.4 | 2026-02-12 | 优化域名可读性：使用索引器名称生成域名；重写get_page使用标准表格；简化显示 |
 | 0.1.3 | 2026-02-12 | 修复站点注册问题：恢复torrents/parser字典结构确保add_indexer成功；增加详细注册日志 |
 | 0.1.2 | 2026-02-12 | 彻底修复模块劫持问题：将torrents和parser设置为None；添加type='indexer'标记；完善诊断日志 |
@@ -403,6 +404,6 @@ docker restart moviepilot
 
 ---
 
-**版本**: 0.1.4
+**版本**: 0.1.5
 **作者**: Claude
 **最后更新**: 2026-02-12

@@ -39,7 +39,7 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "Prowlarr索引器"
     plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "0.1.4"
+    plugin_version = "0.1.5"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "prowlarrindexer_"
@@ -170,12 +170,19 @@ class ProwlarrIndexer(_PluginBase):
 
                     logger.debug(f"【{self.plugin_name}】准备注册索引器：{name} (domain: {domain})")
 
-                    # Register with sites helper
+                    # Register with sites helper - try both methods for compatibility
                     try:
-                        self._sites_helper.add_indexer(domain, indexer_dict)
-                        logger.info(f"【{self.plugin_name}】✅ 成功注册索引器：{name}")
+                        # Try add_site first (for search list visibility)
+                        if hasattr(self._sites_helper, 'add_site'):
+                            self._sites_helper.add_site(domain, indexer_dict)
+                            logger.info(f"【{self.plugin_name}】✅ 成功注册站点(add_site)：{name}")
+                        else:
+                            # Fallback to add_indexer
+                            self._sites_helper.add_indexer(domain, indexer_dict)
+                            logger.info(f"【{self.plugin_name}】✅ 成功注册索引器(add_indexer)：{name}")
                     except Exception as reg_error:
-                        logger.error(f"【{self.plugin_name}】❌ add_indexer 失败：{name}, 错误：{str(reg_error)}")
+                        logger.error(f"【{self.plugin_name}】❌ 注册失败：{name}, 错误：{str(reg_error)}")
+                        logger.debug(f"【{self.plugin_name}】站点数据：{indexer_dict}")
                         raise
 
                     self._indexers.append(indexer_dict)
@@ -263,7 +270,7 @@ class ProwlarrIndexer(_PluginBase):
         domain = f"http://{self.DOMAIN_PREFIX}.{indexer_slug}.indexer"
 
         # Build complete indexer dictionary
-        # CRITICAL: Must have correct structure for add_indexer to work
+        # CRITICAL: Must have correct structure for site registration and search visibility
         return {
             # Basic identification
             "id": f"{self.plugin_name}-{indexer_id}",
@@ -275,12 +282,21 @@ class ProwlarrIndexer(_PluginBase):
             "indexer_id": indexer_id,  # Store original Prowlarr ID
             "indexer_name": indexer_name,
 
-            # Site properties
-            "public": indexer.get("privacy", "") == "public",
+            # Site properties - IMPORTANT for search visibility
+            "public": True,  # Mark as public so it shows in search
             "proxy": self._proxy,
             "priority": indexer.get("priority", 25),
             "language": indexer.get("language", ["en-US"]),
             "protocol": indexer.get("protocol", "torrent"),
+
+            # Site status
+            "active": True,  # Mark as active
+            "is_active": True,  # Alternative active flag
+
+            # Limits
+            "limit_interval": 0,  # No rate limit (handled by Prowlarr)
+            "limit_count": 0,
+            "limit_seconds": 0,
 
             # Disable rendering
             "render": False,
