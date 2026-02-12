@@ -59,8 +59,8 @@ class ProwlarrIndexer(_PluginBase):
     _sites_helper: Optional[SitesHelper] = None
     _last_update: Optional[datetime] = None
 
-    # Domain prefix for indexer identification
-    DOMAIN_PREFIX = "prowlarr"
+    # Domain prefix for indexer identification (using underscore like reference implementation)
+    DOMAIN_PREFIX = "prowlarr_indexer"
 
     def init_plugin(self, config: dict = None):
         """
@@ -269,34 +269,19 @@ class ProwlarrIndexer(_PluginBase):
         indexer_id = indexer.get("id")
         indexer_name = indexer.get("name", f"Indexer{indexer_id}")
 
-        # Sanitize indexer_name for domain (remove spaces and special chars, convert to lowercase)
-        indexer_name_slug = re.sub(r'[^a-z0-9]+', '-', indexer_name.lower()).strip('-')
+        # Build domain identifier (matching reference implementation pattern)
+        # Format: prowlarr_indexer.{indexer_id}
+        domain = f"{self.DOMAIN_PREFIX}.{indexer_id}"
 
-        # Build domain identifier - simple format without http:// and .indexer
-        # Format: prowlarr.{indexer_name_slug}
-        domain = f"{self.DOMAIN_PREFIX}.{indexer_name_slug}"
-
-        # Build indexer dictionary with necessary fields for MoviePilot compatibility
+        # Build simplified indexer dictionary (matching reference implementation)
+        # Only include fields that are in the reference implementation
         return {
-            # Basic identification - use indexer_name for better display
             "id": f"{self.plugin_name}-{indexer_name}",
             "name": f"{self.plugin_name}-{indexer_name}",
             "url": f"{self._host.rstrip('/')}/api/v1/indexer/{indexer_id}",
             "domain": domain,
-
-            # Store original data for display and search
-            "indexer_id": indexer_id,
-            "indexer_name": indexer_name,
-
-            # Site properties
             "public": True,
             "proxy": self._proxy,
-
-            # Essential flags to prevent MoviePilot from treating this as a regular site
-            "render": False,
-            "chrome": False,
-            "cookie": "",
-            "ua": "",
         }
 
     def get_state(self) -> bool:
@@ -397,15 +382,26 @@ class ProwlarrIndexer(_PluginBase):
             # Log that method was called
             logger.info(f"【{self.plugin_name}】开始搜索：站点={site_name}, 关键词={keyword}, 类型={mtype}, 页码={page}")
 
-            # Extract indexer ID from site (stored in indexer dict)
-            # Domain format is now: http://prowlarr.{indexer_name}.indexer
-            # But we get indexer_id directly from site info
-            indexer_id = site.get("indexer_id")
-            if not indexer_id:
-                logger.warning(f"【{self.plugin_name}】站点缺少 indexer_id 字段：{site_name}")
+            # Extract indexer ID from domain (matching reference implementation)
+            # Domain format: prowlarr_indexer.{indexer_id}
+            domain = site.get("domain", "")
+            if not domain:
+                logger.warning(f"【{self.plugin_name}】站点缺少 domain 字段：{site_name}")
                 return results
 
-            logger.debug(f"【{self.plugin_name}】使用索引器ID：{indexer_id}")
+            # Parse indexer ID from domain (format: prowlarr_indexer.123)
+            domain_parts = domain.split(".")
+            if len(domain_parts) < 2:
+                logger.warning(f"【{self.plugin_name}】无法从domain解析索引器ID：{domain}")
+                return results
+
+            indexer_id_str = domain_parts[-1]  # Take last part
+            if not indexer_id_str or not indexer_id_str.isdigit():
+                logger.warning(f"【{self.plugin_name}】从domain提取的索引器ID无效：{domain} -> {indexer_id_str}")
+                return results
+
+            indexer_id = int(indexer_id_str)
+            logger.debug(f"【{self.plugin_name}】从domain提取索引器ID：{indexer_id}")
 
             # Build search parameters
             search_params = self._build_search_params(
@@ -818,7 +814,7 @@ class ProwlarrIndexer(_PluginBase):
                     'content': [
                         {
                             'component': 'td',
-                            'text': site.get("indexer_name", "Unknown")
+                            'text': site.get("name", "Unknown")
                         },
                         {
                             'component': 'td',

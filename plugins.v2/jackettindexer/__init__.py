@@ -60,8 +60,8 @@ class JackettIndexer(_PluginBase):
     _sites_helper: Optional[SitesHelper] = None
     _last_update: Optional[datetime] = None
 
-    # Domain prefix for indexer identification
-    DOMAIN_PREFIX = "jackett"
+    # Domain prefix for indexer identification (using underscore like reference implementation)
+    DOMAIN_PREFIX = "jackett_indexer"
 
     # Torznab namespace for XML parsing
     TORZNAB_NS = "http://torznab.com/schemas/2015/feed"
@@ -313,31 +313,19 @@ class JackettIndexer(_PluginBase):
         indexer_id = indexer.get("id", "")
         indexer_title = indexer.get("title", f"Indexer-{indexer_id}")
 
-        # Build domain identifier - simple format without http:// and .indexer
-        # Format: jackett.{indexer_id}
+        # Build domain identifier (matching reference implementation pattern)
+        # Format: jackett_indexer.{indexer_id}
         domain = f"{self.DOMAIN_PREFIX}.{indexer_id}"
 
-        # Build indexer dictionary with necessary fields for MoviePilot compatibility
+        # Build simplified indexer dictionary (matching reference implementation)
+        # Only include fields that are in the reference implementation
         return {
-            # Basic identification
             "id": f"{self.plugin_name}-{indexer_title}",
             "name": f"{self.plugin_name}-{indexer_title}",
             "url": f"{self._host.rstrip('/')}/api/v2.0/indexers/{indexer_id}/results/torznab/",
             "domain": domain,
-
-            # Store original data for display and search
-            "indexer_id": indexer_id,
-            "indexer_title": indexer_title,
-
-            # Site properties
             "public": True,
             "proxy": self._proxy,
-
-            # Essential flags to prevent MoviePilot from treating this as a regular site
-            "render": False,
-            "chrome": False,
-            "cookie": "",
-            "ua": "",
         }
 
     def get_state(self) -> bool:
@@ -438,21 +426,20 @@ class JackettIndexer(_PluginBase):
             # Log that method was called
             logger.info(f"【{self.plugin_name}】开始搜索：站点={site_name}, 关键词={keyword}, 类型={mtype}, 页码={page}")
 
-            # Extract indexer ID from domain
-            # Domain format: jackett.{indexer_id}
+            # Extract indexer ID from domain (matching reference implementation)
+            # Domain format: jackett_indexer.{indexer_id}
             domain = site.get("domain", "")
             if not domain:
                 logger.warning(f"【{self.plugin_name}】站点缺少 domain 字段：{site_name}")
                 return results
 
-            # Parse indexer ID from domain (split by ., take second part)
-            # jackett.beyond-hd-api -> beyond-hd-api
+            # Parse indexer ID from domain (format: jackett_indexer.beyond-hd-api)
             domain_parts = domain.split(".")
             if len(domain_parts) < 2:
                 logger.warning(f"【{self.plugin_name}】无法从domain解析索引器ID：{domain}")
                 return results
 
-            indexer_id = domain_parts[1]
+            indexer_id = domain_parts[-1]  # Take last part
             if not indexer_id:
                 logger.warning(f"【{self.plugin_name}】从domain提取的索引器ID为空：{domain}")
                 return results
@@ -970,7 +957,7 @@ class JackettIndexer(_PluginBase):
                     'content': [
                         {
                             'component': 'td',
-                            'text': site.get("indexer_title", "Unknown")
+                            'text': site.get("name", "Unknown")
                         },
                         {
                             'component': 'td',
