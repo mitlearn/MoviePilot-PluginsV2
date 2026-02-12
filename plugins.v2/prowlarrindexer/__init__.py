@@ -4,6 +4,7 @@ MoviePilot 插件：ProwlarrIndexer
 通过 Prowlarr API 搜索资源，将结果以 TorrentInfo 列表返回给 MoviePilot。
 """
 import copy
+import json
 import re
 import time
 import traceback
@@ -36,7 +37,7 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "ProwlarrIndexer"
     plugin_desc = "聚合索引：通过 Prowlarr 检索站点资源"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "0.2"
+    plugin_version = "0.3"
     plugin_author = "prowlarr"
     author_url = "https://github.com/prowlarr"
     plugin_config_prefix = "prowlarr_indexer_"
@@ -132,14 +133,12 @@ class ProwlarrIndexer(_PluginBase):
         site: dict,
         keyword: str = None,
         mtype: Optional[MediaType] = None,
-        cat: Optional[str] = None,
         page: Optional[int] = 0,
     ) -> List[TorrentInfo]:
         """
         异步搜索入口，MoviePilot 搜索链实际调用此方法。
-        内部委托同步 search_torrents 实现。
         """
-        return self.search_torrents(site=site, keyword=keyword, mtype=mtype, cat=cat, page=page)
+        return self.search_torrents(site=site, keyword=keyword, mtype=mtype, page=page)
 
     # ==================== 搜索逻辑 ====================
 
@@ -148,7 +147,6 @@ class ProwlarrIndexer(_PluginBase):
         site: dict,
         keyword: str = None,
         mtype: Optional[MediaType] = None,
-        cat: Optional[str] = None,
         page: Optional[int] = 0,
     ) -> List[TorrentInfo]:
         """
@@ -160,12 +158,13 @@ class ProwlarrIndexer(_PluginBase):
         if not site_name.startswith(self.plugin_name):
             return []
 
-        logger.debug(f"[{self.plugin_name}] 搜索 -> 站点: {site_name}, "
+        logger.info(f"[{self.plugin_name}] 搜索 -> 站点: {site_name}, "
                      f"关键词: {keyword}, 类型: {mtype}, 页码: {page}")
 
         indexer_id = self._extract_indexer_id(site)
         if not indexer_id:
-            logger.warning(f"[{self.plugin_name}] 无法提取 indexer ID: {site_name}")
+            logger.warning(f"[{self.plugin_name}] 无法提取 indexer ID: {site_name}, "
+                           f"domain={site.get('domain')}, map_keys={list(self._indexer_map.keys())}")
             return []
 
         headers = self._build_headers()
@@ -182,7 +181,7 @@ class ProwlarrIndexer(_PluginBase):
 
         query_string = urlencode(params, quote_via=quote_plus)
         api_url = f"{self._host}/api/v1/search?{query_string}"
-        logger.debug(f"[{self.plugin_name}] 请求 URL: {api_url}")
+        logger.info(f"[{self.plugin_name}] 请求 Prowlarr: {api_url}")
 
         response = self._request_with_retry(api_url, headers=headers)
         if not response:
@@ -237,9 +236,8 @@ class ProwlarrIndexer(_PluginBase):
             return
 
         headers = self._build_headers()
-        # 使用 /api/v1/indexer 获取已配置的索引器列表
         url = f"{self._host}/api/v1/indexer"
-        logger.debug(f"[{self.plugin_name}] 索引器列表请求: {url}")
+        logger.info(f"[{self.plugin_name}] 索引器列表请求: {url}")
 
         response = self._request_with_retry(url, headers=headers)
         if not response:
@@ -262,7 +260,6 @@ class ProwlarrIndexer(_PluginBase):
             indexer_name = v.get("name")
             if not indexer_id or not indexer_name:
                 continue
-            # 仅添加已启用且支持搜索的索引器
             if not v.get("enable", True):
                 continue
             if not v.get("supportsSearch", True):
@@ -283,7 +280,8 @@ class ProwlarrIndexer(_PluginBase):
             })
 
         logger.info(f"[{self.plugin_name}] 获取到 {len(self._indexers)} 个索引器")
-        self._register_indexers()
+        for idx in self._indexers:
+            logger.info(f"[{self.plugin_name}]   - {idx['name']} (id={idx['id']}, domain={idx['domain']})")
 
     def _register_indexers(self):
         if not self._sites_helper:
@@ -292,8 +290,43 @@ class ProwlarrIndexer(_PluginBase):
             domain = indexer.get("domain", "")
             if not domain:
                 continue
-            self._sites_helper.add_indexer(domain, copy.deepcopy(indexer))
-            logger.debug(f"[{self.plugin_name}] 注册索引器: {indexer.get('name')} -> {domain}")
+            existing = self._sites_helper.get_indexer(domain)
+            if not existing:
+                self._sites_helper.add_indexer(domain, copy.deepcopy(indexer))
+                logger.info(f"[{self.plugin_name}] 注册索引器: {indexer.get('name')} -> {domain}")
+            else:
+                logger.debug(f"[{self.plugin_name}] 索引器已存在: {domain}")
+
+    # ==================== 测试连接 ====================
+
+    def _test_connection(self) -> dict:
+        """测试 Prowlarr 连接，返回状态信息"""
+        if not self._host or not self._api_key:
+            return {"status": "error", "message": "地址或 API Key 未配置"}
+
+        headers = self._build_headers()
+        url = f"{self._host}/api/v1/indexer"
+
+        try:
+            ret = RequestUtils(headers=headers, timeout=self._timeout).get_res(
+                url, proxies=settings.PROXY if self._proxy else None
+            )
+        except Exception as e:
+            return {"status": "error", "message": f"连接异常: {e}"}
+
+        if not ret:
+            return {"status": "error", "message": "无响应"}
+        if ret.status_code == 401:
+            return {"status": "error", "message": "API Key 无效 (401)"}
+        if ret.status_code != 200:
+            return {"status": "error", "message": f"HTTP {ret.status_code}"}
+
+        try:
+            data = ret.json()
+            count = len(data) if isinstance(data, list) else 0
+            return {"status": "ok", "message": f"连接成功，发现 {count} 个索引器"}
+        except Exception as e:
+            return {"status": "error", "message": f"JSON 解析失败: {e}"}
 
     # ==================== HTTP 工具 ====================
 
@@ -359,7 +392,7 @@ class ProwlarrIndexer(_PluginBase):
 
     @staticmethod
     def _sanitize_name(name: str) -> str:
-        """将索引器名称转为安全的域名片段（小写字母、数字、下划线、连字符）"""
+        """将索引器名称转为安全的域名片段"""
         s = re.sub(r'[^a-zA-Z0-9_-]', '_', name.strip().lower())
         s = re.sub(r'_+', '_', s).strip('_')
         return s or "unknown"
@@ -422,7 +455,12 @@ class ProwlarrIndexer(_PluginBase):
         return []
 
     def get_api(self) -> List[Dict[str, Any]]:
-        return []
+        return [{
+            "path": "/test",
+            "endpoint": self._test_connection,
+            "methods": ["GET"],
+            "summary": "测试 Prowlarr 连接",
+        }]
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         return [
@@ -548,9 +586,10 @@ class ProwlarrIndexer(_PluginBase):
                                     "variant": "tonal",
                                     "text": "使用说明：\n"
                                             "1. 填写 Prowlarr 地址和 API Key，开启「立即刷新索引」\n"
-                                            "2. 在「查看数据」页面复制站点 domain\n"
-                                            "3. 到站点管理新增站点（格式: https://<domain>）\n"
-                                            "4. 在搜索设置中勾选新增的站点即可使用",
+                                            "2. 在「查看数据」页面查看已注册的索引器及其 ID\n"
+                                            "3. 到 MoviePilot「搜索设置」中勾选以 ProwlarrIndexer 开头的站点\n"
+                                            "4. 若更新插件后域名变更，需重新在搜索设置中勾选\n"
+                                            "5. 可通过 API /test 测试连接：/api/v1/plugin/ProwlarrIndexer/test",
                                 },
                             }],
                         }],
@@ -593,6 +632,7 @@ class ProwlarrIndexer(_PluginBase):
             rows.append({
                 "component": "tr",
                 "content": [
+                    {"component": "td", "text": site.get("id", "")},
                     {"component": "td", "text": site.get("name", "")},
                     {"component": "td", "text": f"https://{site.get('domain', '')}"},
                     {"component": "td", "text": "是" if site.get("public") else "否"},
@@ -600,6 +640,21 @@ class ProwlarrIndexer(_PluginBase):
             })
 
         return [{
+            "component": "VRow",
+            "content": [{
+                "component": "VCol",
+                "props": {"cols": 12},
+                "content": [{
+                    "component": "VAlert",
+                    "props": {
+                        "type": "success",
+                        "variant": "tonal",
+                        "text": f"已注册 {len(self._indexers)} 个索引器。"
+                                f"请到「搜索设置」中勾选以 ProwlarrIndexer 开头的站点。",
+                    },
+                }],
+            }],
+        }, {
             "component": "VRow",
             "content": [{
                 "component": "VCol",
@@ -613,6 +668,7 @@ class ProwlarrIndexer(_PluginBase):
                             "content": [{
                                 "component": "tr",
                                 "content": [
+                                    {"component": "th", "props": {"class": "text-start ps-4"}, "text": "站点 ID"},
                                     {"component": "th", "props": {"class": "text-start ps-4"}, "text": "索引器名称"},
                                     {"component": "th", "props": {"class": "text-start ps-4"}, "text": "站点 Domain"},
                                     {"component": "th", "props": {"class": "text-start ps-4"}, "text": "公开"},

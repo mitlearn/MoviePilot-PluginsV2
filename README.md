@@ -59,6 +59,14 @@ https://github.com/<your-repo>/prowalarr/
 
 ## 更新日志
 
+### v0.3
+
+- **JackettIndexer**: 修复索引器列表 JSON 解析失败，使用 session 登录获取 cookies 进行认证（参考 JackettExtend 实现），增强 JSON 解析兼容性（BOM 处理）
+- **两个插件**: 新增测试连接 API 端点（`/test`），可在插件数据页面验证与 Prowlarr / Jackett 的连通性
+- **两个插件**: 完善日志输出，索引器注册时逐一打印域名和 ID
+- **两个插件**: 更新插件 UI 说明，明确提示用户需到「搜索设置」勾选插件注册的站点
+- **两个插件**: 注册索引器前检查是否已存在，避免重复注册
+
 ### v0.2
 
 - **JackettIndexer**: 修复索引器列表请求认证失败（`apikey` 需作为查询参数传递）
