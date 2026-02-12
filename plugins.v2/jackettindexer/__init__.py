@@ -39,7 +39,7 @@ class JackettIndexer(_PluginBase):
     plugin_name = "Jackett索引器"
     plugin_desc = "集成Jackett索引器搜索，支持Torznab协议多站点搜索。"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "0.1.0"
+    plugin_version = "0.1.1"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "jackettindexer_"
@@ -290,8 +290,8 @@ class JackettIndexer(_PluginBase):
         indexer_id = indexer.get("id", "")
         indexer_title = indexer.get("title", f"Indexer-{indexer_id}")
 
-        # Build domain identifier (used for routing)
-        domain = f"http://{self.DOMAIN_PREFIX}-{indexer_id.lower().replace(' ', '-')}.indexer"
+        # Build domain identifier (used for routing) - use clean indexer_id
+        domain = f"http://{self.DOMAIN_PREFIX}.{indexer_id.lower().replace(' ', '-')}.indexer"
 
         # Build complete indexer dictionary
         return {
@@ -305,6 +305,13 @@ class JackettIndexer(_PluginBase):
             "proxy": self._proxy,
             "language": indexer.get("language", "en-US"),
             "protocol": "torrent",
+            # Critical: Disable spider/crawler to force module hijacking
+            "render": False,  # Don't use browser rendering
+            "chrome": False,  # Don't use Chrome
+            # Empty RSS/search config - not used for API-based indexers
+            "rss": None,
+            "search": None,
+            "browse": None,
             # Add torrents structure to prevent spider crashes
             "torrents": {
                 "list": {
@@ -392,15 +399,27 @@ class JackettIndexer(_PluginBase):
         results = []
 
         try:
+            # Log that method was called
+            logger.debug(f"【{self.plugin_name}】search_torrents 被调用：site={site}, keyword={keyword}, mtype={mtype}, page={page}")
+
             # Validate inputs
-            if not site or not keyword:
-                logger.debug(f"【{self.plugin_name}】搜索参数无效：site={site}, keyword={keyword}")
+            if not site:
+                logger.warning(f"【{self.plugin_name}】站点参数为空")
+                return []
+
+            if not keyword:
+                logger.warning(f"【{self.plugin_name}】关键词为空")
                 return []
 
             # Check if this site belongs to our plugin
-            site_name = site.get("name", "")
+            site_name = site.get("name", "") if isinstance(site, dict) else ""
+            if not site_name:
+                logger.warning(f"【{self.plugin_name}】站点缺少 name 字段：{site}")
+                return []
+
             if not site_name.startswith(self.plugin_name):
                 # Not our site, return empty to let other plugins handle
+                logger.debug(f"【{self.plugin_name}】站点 {site_name} 不属于本插件")
                 return []
 
             # Extract indexer information
@@ -916,11 +935,12 @@ class JackettIndexer(_PluginBase):
         if self._indexers:
             for indexer in self._indexers:
                 indexer_rows.append({
+                    'site_id': indexer.get('id', 'N/A'),
                     'name': indexer.get('indexer_title', 'Unknown'),
-                    'id': indexer.get('indexer_id', 'N/A'),
-                    'type': '公开' if indexer.get('public', False) else '私有',
+                    'indexer_id': indexer.get('indexer_id', 'N/A'),
+                    'domain': indexer.get('domain', 'N/A'),
+                    'public': '是' if indexer.get('public', False) else '否',
                     'language': indexer.get('language', 'en-US'),
-                    'protocol': indexer.get('protocol', 'torrent'),
                 })
 
         # Build status info
@@ -970,11 +990,12 @@ class JackettIndexer(_PluginBase):
                                     'hover': True,
                                     'density': 'compact',
                                     'headers': [
+                                        {'title': '站点ID', 'key': 'site_id'},
                                         {'title': '索引器名称', 'key': 'name'},
-                                        {'title': 'ID', 'key': 'id'},
-                                        {'title': '类型', 'key': 'type'},
+                                        {'title': '索引器ID', 'key': 'indexer_id'},
+                                        {'title': '域名', 'key': 'domain'},
+                                        {'title': '公开', 'key': 'public'},
                                         {'title': '语言', 'key': 'language'},
-                                        {'title': '协议', 'key': 'protocol'},
                                     ],
                                     'items': indexer_rows
                                 }

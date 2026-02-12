@@ -38,7 +38,7 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "Prowlarr索引器"
     plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "0.1.0"
+    plugin_version = "0.1.1"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "prowlarrindexer_"
@@ -246,8 +246,8 @@ class ProwlarrIndexer(_PluginBase):
         indexer_id = indexer.get("id")
         indexer_name = indexer.get("name", f"Indexer{indexer_id}")
 
-        # Build domain identifier (used for routing)
-        domain = f"http://{self.DOMAIN_PREFIX}-{indexer_name.lower().replace(' ', '-')}.indexer"
+        # Build domain identifier (used for routing) - use indexer_id for uniqueness
+        domain = f"http://{self.DOMAIN_PREFIX}.{indexer_id}.indexer"
 
         # Build complete indexer dictionary
         return {
@@ -262,6 +262,13 @@ class ProwlarrIndexer(_PluginBase):
             "priority": indexer.get("priority", 25),
             "language": indexer.get("language", ["en-US"]),
             "protocol": indexer.get("protocol", "torrent"),
+            # Critical: Disable spider/crawler to force module hijacking
+            "render": False,  # Don't use browser rendering
+            "chrome": False,  # Don't use Chrome
+            # Empty RSS/search config - not used for API-based indexers
+            "rss": None,
+            "search": None,
+            "browse": None,
             # Add torrents structure to prevent spider crashes
             "torrents": {
                 "list": {
@@ -349,15 +356,27 @@ class ProwlarrIndexer(_PluginBase):
         results = []
 
         try:
+            # Log that method was called
+            logger.debug(f"【{self.plugin_name}】search_torrents 被调用：site={site}, keyword={keyword}, mtype={mtype}, page={page}")
+
             # Validate inputs
-            if not site or not keyword:
-                logger.debug(f"【{self.plugin_name}】搜索参数无效：site={site}, keyword={keyword}")
+            if not site:
+                logger.warning(f"【{self.plugin_name}】站点参数为空")
+                return []
+
+            if not keyword:
+                logger.warning(f"【{self.plugin_name}】关键词为空")
                 return []
 
             # Check if this site belongs to our plugin
-            site_name = site.get("name", "")
+            site_name = site.get("name", "") if isinstance(site, dict) else ""
+            if not site_name:
+                logger.warning(f"【{self.plugin_name}】站点缺少 name 字段：{site}")
+                return []
+
             if not site_name.startswith(self.plugin_name):
                 # Not our site, return empty to let other plugins handle
+                logger.debug(f"【{self.plugin_name}】站点 {site_name} 不属于本插件")
                 return []
 
             # Extract indexer information
@@ -778,9 +797,10 @@ class ProwlarrIndexer(_PluginBase):
         if self._indexers:
             for indexer in self._indexers:
                 indexer_rows.append({
+                    'site_id': indexer.get('id', 'N/A'),
                     'name': indexer.get('indexer_name', 'Unknown'),
-                    'id': indexer.get('indexer_id', 'N/A'),
-                    'protocol': indexer.get('protocol', 'torrent'),
+                    'indexer_id': indexer.get('indexer_id', 'N/A'),
+                    'domain': indexer.get('domain', 'N/A'),
                     'public': '是' if indexer.get('public', False) else '否',
                     'priority': indexer.get('priority', 25),
                 })
@@ -832,9 +852,10 @@ class ProwlarrIndexer(_PluginBase):
                                     'hover': True,
                                     'density': 'compact',
                                     'headers': [
+                                        {'title': '站点ID', 'key': 'site_id'},
                                         {'title': '索引器名称', 'key': 'name'},
-                                        {'title': 'ID', 'key': 'id'},
-                                        {'title': '协议', 'key': 'protocol'},
+                                        {'title': '索引器ID', 'key': 'indexer_id'},
+                                        {'title': '域名', 'key': 'domain'},
                                         {'title': '公开', 'key': 'public'},
                                         {'title': '优先级', 'key': 'priority'},
                                     ],

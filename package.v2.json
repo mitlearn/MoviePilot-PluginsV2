@@ -3,24 +3,26 @@
     "name": "Prowlarr索引器",
     "description": "集成Prowlarr索引器搜索，支持多站点统一搜索",
     "labels": "indexer,prowlarr,torrent,search",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "icon": "Prowlarr.png",
     "author": "Claude",
     "level": 1,
     "history": {
-      "v0.1.0": "初始版本发布，支持Prowlarr API搜索、自动同步索引器、分类过滤、定时同步"
+      "v0.1.0": "初始版本发布，支持Prowlarr API搜索、自动同步索引器、分类过滤、定时同步",
+      "v0.1.1": "修复爬虫冲突问题：添加render/chrome/rss/search/browse字段禁用爬虫；优化域名格式使用数字ID；增强日志记录；改进查看数据页展示站点ID、索引器ID、域名等完整信息"
     }
   },
   "JackettIndexer": {
     "name": "Jackett索引器",
     "description": "集成Jackett索引器搜索，支持Torznab协议多站点搜索",
     "labels": "indexer,jackett,torrent,search,torznab",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "icon": "Jackett_A.png",
     "author": "Claude",
     "level": 1,
     "history": {
-      "v0.1.0": "初始版本发布，支持Jackett Torznab API搜索、自动同步索引器、XML解析、定时同步"
+      "v0.1.0": "初始版本发布，支持Jackett Torznab API搜索、自动同步索引器、XML解析、定时同步",
+      "v0.1.1": "修复爬虫冲突问题：添加render/chrome/rss/search/browse字段禁用爬虫；优化域名格式使用数字ID；增强日志记录；改进查看数据页展示站点ID、索引器ID、域名等完整信息"
     }
   }
 }
