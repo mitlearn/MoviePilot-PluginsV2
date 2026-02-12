@@ -9,6 +9,7 @@ Version: 0.1.0
 Author: Claude
 """
 
+import copy
 import re
 import traceback
 from typing import List, Dict, Optional, Any, Tuple
@@ -99,15 +100,33 @@ class ProwlarrIndexer(_PluginBase):
         # Initialize sites helper
         self._sites_helper = SitesHelper()
 
-        # Sync indexers immediately
-        logger.info(f"【{self.plugin_name}】开始同步索引器列表...")
+        # Fetch indexers from Prowlarr first
+        logger.info(f"【{self.plugin_name}】开始从Prowlarr获取索引器...")
+        indexers = self._get_indexers_from_prowlarr()
+        if not indexers:
+            logger.error(f"【{self.plugin_name}】未获取到索引器列表")
+            return
+
+        # Build indexer dicts
+        self._indexers = []
+        for indexer_data in indexers:
+            try:
+                indexer_dict = self._build_indexer_dict(indexer_data)
+                self._indexers.append(indexer_dict)
+            except Exception as e:
+                logger.error(f"【{self.plugin_name}】构建索引器失败：{str(e)}")
+                continue
+
+        logger.info(f"【{self.plugin_name}】成功获取 {len(self._indexers)} 个索引器")
+
+        # Sync to site management
+        logger.info(f"【{self.plugin_name}】开始同步到站点管理...")
         if self._sync_indexers():
-            logger.info(f"【{self.plugin_name}】成功同步 {len(self._indexers)} 个索引器")
             # Log registered indexers for debugging
             for idx in self._indexers:
-                logger.debug(f"【{self.plugin_name}】已注册索引器：{idx.get('name')} (domain: {idx.get('domain')})")
+                logger.debug(f"【{self.plugin_name}】索引器信息：{idx.get('name')} (domain: {idx.get('domain')})")
         else:
-            logger.error(f"【{self.plugin_name}】同步索引器失败")
+            logger.error(f"【{self.plugin_name}】同步到站点管理失败")
             return
 
         # Setup scheduler for periodic sync
@@ -144,73 +163,50 @@ class ProwlarrIndexer(_PluginBase):
         """
         try:
             # Fetch indexers from Prowlarr
-            indexers = self._get_indexers_from_prowlarr()
+            if not self._indexers:
+                indexers = self._get_indexers_from_prowlarr()
+                if not indexers:
+                    logger.warning(f"【{self.plugin_name}】未获取到索引器列表")
+                    return False
+            else:
+                # Already have indexers cached
+                indexers = self._indexers
 
-            if not indexers:
-                logger.warning(f"【{self.plugin_name}】未获取到索引器列表")
-                return False
-
-            # Unregister old indexers
-            if self._indexers:
-                for old_indexer in self._indexers:
-                    domain = old_indexer.get("domain")
-                    if domain:
-                        try:
-                            self._sites_helper.delete_indexer(domain)
-                        except Exception as e:
-                            logger.debug(f"【{self.plugin_name}】删除旧索引器失败 {domain}：{str(e)}")
-
-            # Register new indexers
-            self._indexers = []
-            for indexer in indexers:
+            # Register indexers to site management
+            registered_count = 0
+            for indexer_data in indexers:
                 try:
-                    indexer_dict = self._build_indexer_dict(indexer)
-                    domain = indexer_dict["domain"]
-                    name = indexer_dict["name"]
+                    # Build indexer dict if it's raw data from API
+                    if "indexer_id" not in indexer_data:
+                        indexer_dict = self._build_indexer_dict(indexer_data)
+                    else:
+                        indexer_dict = indexer_data
 
-                    logger.debug(f"【{self.plugin_name}】准备注册索引器：{name} (domain: {domain})")
+                    domain = indexer_dict.get("domain", "")
+                    name = indexer_dict.get("name", "Unknown")
 
-                    # Register with sites helper - try multiple methods
-                    registered = False
-                    try:
-                        # Method 1: Try add_site first (for search list visibility)
-                        if hasattr(self._sites_helper, 'add_site'):
-                            self._sites_helper.add_site(domain, indexer_dict)
-                            logger.info(f"【{self.plugin_name}】✅ 成功注册站点(add_site)：{name}")
-                            registered = True
+                    # Check if already exists in site management
+                    site_info = self._sites_helper.get_indexer(domain)
+                    if not site_info:
+                        # Not exists, add it
+                        new_indexer = copy.deepcopy(indexer_dict)
+                        self._sites_helper.add_indexer(domain, new_indexer)
+                        logger.info(f"【{self.plugin_name}】✅ 成功添加到站点管理：{name} (domain: {domain})")
+                        registered_count += 1
+                    else:
+                        # Already exists, skip
+                        logger.debug(f"【{self.plugin_name}】站点已存在，跳过：{name} (domain: {domain})")
 
-                        # Method 2: Also try add_indexer
-                        if hasattr(self._sites_helper, 'add_indexer'):
-                            self._sites_helper.add_indexer(domain, indexer_dict)
-                            if not registered:
-                                logger.info(f"【{self.plugin_name}】✅ 成功注册索引器(add_indexer)：{name}")
-                            registered = True
-
-                        # Method 3: Try to add to sites directly if it's a property
-                        if hasattr(self._sites_helper, 'sites') and isinstance(self._sites_helper.sites, dict):
-                            self._sites_helper.sites[domain] = indexer_dict
-                            if not registered:
-                                logger.info(f"【{self.plugin_name}】✅ 成功添加到站点字典：{name}")
-                            registered = True
-
-                        if not registered:
-                            logger.warning(f"【{self.plugin_name}】⚠️ 未找到合适的注册方法，站点可能不可见：{name}")
-                            logger.debug(f"【{self.plugin_name}】SitesHelper 可用方法：{dir(self._sites_helper)}")
-
-                    except Exception as reg_error:
-                        logger.error(f"【{self.plugin_name}】❌ 注册失败：{name}, 错误：{str(reg_error)}")
-                        logger.debug(f"【{self.plugin_name}】站点数据：{indexer_dict}")
-                        # Don't raise, continue with other indexers
-
-                    # Always add to our internal list
-                    self._indexers.append(indexer_dict)
+                    # Add to internal list if not already there
+                    if indexer_dict not in self._indexers:
+                        self._indexers.append(indexer_dict)
 
                 except Exception as e:
                     logger.error(f"【{self.plugin_name}】注册索引器失败：{str(e)}\n{traceback.format_exc()}")
                     continue
 
             self._last_update = datetime.now()
-            logger.info(f"【{self.plugin_name}】索引器同步完成，共 {len(self._indexers)} 个")
+            logger.info(f"【{self.plugin_name}】索引器同步完成，总计 {len(self._indexers)} 个，新增 {registered_count} 个")
             return True
 
         except Exception as e:
