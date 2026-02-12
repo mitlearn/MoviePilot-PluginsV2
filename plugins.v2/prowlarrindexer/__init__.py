@@ -273,15 +273,27 @@ class ProwlarrIndexer(_PluginBase):
         # Format: prowlarr.{indexer_id}
         domain = f"{self.DOMAIN_PREFIX}.{indexer_id}"
 
-        # Build simplified indexer dictionary (matching reference implementation)
-        # Only include essential fields needed for registration and search
+        # Build indexer dictionary with necessary fields for MoviePilot compatibility
         return {
+            # Basic identification
             "id": f"{self.plugin_name}-{indexer_name}",
             "name": f"{self.plugin_name}-{indexer_name}",
             "url": f"{self._host.rstrip('/')}/api/v1/indexer/{indexer_id}",
             "domain": domain,
+
+            # Store original data for display and search
+            "indexer_id": indexer_id,
+            "indexer_name": indexer_name,
+
+            # Site properties
             "public": True,
             "proxy": self._proxy,
+
+            # Essential flags to prevent MoviePilot from treating this as a regular site
+            "render": False,
+            "chrome": False,
+            "cookie": "",
+            "ua": "",
         }
 
     def get_state(self) -> bool:
@@ -354,49 +366,32 @@ class ProwlarrIndexer(_PluginBase):
         """
         results = []
 
+        # Validate inputs first (matching reference implementation pattern)
+        if not site or not keyword:
+            return results
+
+        # Check if this site belongs to our plugin (matching reference implementation)
+        if site.get("name", "").split("-")[0] != self.plugin_name:
+            return results
+
         try:
             # Log that method was called
-            logger.debug(f"【{self.plugin_name}】search_torrents 被调用：site={site}, keyword={keyword}, mtype={mtype}, page={page}")
-
-            # Validate inputs
-            if not site:
-                logger.warning(f"【{self.plugin_name}】站点参数为空")
-                return []
-
-            if not keyword:
-                logger.warning(f"【{self.plugin_name}】关键词为空")
-                return []
-
-            # Check if this site belongs to our plugin
-            site_name = site.get("name", "") if isinstance(site, dict) else ""
-            if not site_name:
-                logger.warning(f"【{self.plugin_name}】站点缺少 name 字段：{site}")
-                return []
-
-            if not site_name.startswith(self.plugin_name):
-                # Not our site, return empty to let other plugins handle
-                logger.debug(f"【{self.plugin_name}】站点 {site_name} 不属于本插件")
-                return []
-
-            # Extract indexer ID from domain
-            # Domain format: prowlarr.{indexer_id}
-            domain = site.get("domain")
-            if not domain:
-                logger.error(f"【{self.plugin_name}】站点缺少 domain 字段：{site_name}")
-                return []
-
-            # Parse indexer ID from domain (format: prowlarr.123)
-            try:
-                indexer_id = domain.split(".")[-1]
-                if not indexer_id or not indexer_id.isdigit():
-                    logger.error(f"【{self.plugin_name}】无法从domain提取索引器ID：{domain}")
-                    return []
-                indexer_id = int(indexer_id)
-            except Exception as e:
-                logger.error(f"【{self.plugin_name}】解析索引器ID失败：{str(e)}")
-                return []
-
+            site_name = site.get("name", "Unknown")
             logger.info(f"【{self.plugin_name}】开始搜索：站点={site_name}, 关键词={keyword}, 类型={mtype}, 页码={page}")
+
+            # Extract indexer ID from domain (format: prowlarr.123)
+            domain = site.get("domain", "")
+            if not domain:
+                logger.warning(f"【{self.plugin_name}】站点缺少 domain 字段：{site_name}")
+                return results
+
+            # Parse indexer ID from domain
+            indexer_id_str = domain.split(".")[-1] if "." in domain else ""
+            if not indexer_id_str or not indexer_id_str.isdigit():
+                logger.warning(f"【{self.plugin_name}】无法从domain提取有效的索引器ID：{domain}")
+                return results
+
+            indexer_id = int(indexer_id_str)
 
             # Build search parameters
             search_params = self._build_search_params(
