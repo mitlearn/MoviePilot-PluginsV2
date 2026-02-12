@@ -41,7 +41,7 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "Prowlarr索引器"
     plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "0.4.0"
+    plugin_version = "0.4.1"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "prowlarrindexer_"
@@ -653,6 +653,15 @@ class ProwlarrIndexer(_PluginBase):
                 logger.debug(f"【{self.plugin_name}】跳过无下载链接的结果：{title}")
                 return None
 
+            # Parse indexer flags (Prowlarr returns a list/array)
+            indexer_flags = item.get("indexerFlags", [])
+            # Check for Freeleech flag (value 1 in the list)
+            is_freeleech = False
+            if isinstance(indexer_flags, list):
+                is_freeleech = 1 in indexer_flags
+            elif isinstance(indexer_flags, int):
+                is_freeleech = (indexer_flags & 1) == 1
+
             # Build TorrentInfo object
             torrent = TorrentInfo(
                 title=title,
@@ -665,7 +674,7 @@ class ProwlarrIndexer(_PluginBase):
                 site_name=site_name,
                 pubdate=self._parse_publish_date(item.get("publishDate", "")),
                 imdbid=self._format_imdb_id(item.get("imdbId")),
-                downloadvolumefactor=0.0 if item.get("indexerFlags", 0) & 1 else 1.0,  # Freeleech flag
+                downloadvolumefactor=0.0 if is_freeleech else 1.0,
                 uploadvolumefactor=1.0,
                 grabs=item.get("grabs", 0),
             )
