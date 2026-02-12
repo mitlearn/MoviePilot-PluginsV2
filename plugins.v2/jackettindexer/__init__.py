@@ -16,6 +16,7 @@ import xml.dom.minidom
 from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime
 from urllib.parse import urlencode
+import unicodedata
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -42,7 +43,7 @@ class JackettIndexer(_PluginBase):
     plugin_name = "Jackett索引器"
     plugin_desc = "集成Jackett索引器搜索，支持Torznab协议多站点搜索。"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "0.5.0"
+    plugin_version = "0.6.0"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "jackettindexer_"
@@ -327,10 +328,18 @@ class JackettIndexer(_PluginBase):
         """
         indexer_id = indexer.get("id", "")
         indexer_title = indexer.get("title", f"Indexer-{indexer_id}")
+        indexer_type = indexer.get("type", "")
 
         # Build domain identifier (matching JackettExtend reference implementation)
         # Replace author part with indexer_id: "jackett_indexer.claude" -> "jackett_indexer.{indexer_id}"
         domain = self.JACKETT_DOMAIN.replace(self.plugin_author.lower(), str(indexer_id))
+
+        # Detect if indexer is public or private based on type
+        # Jackett types: "public", "semi-public", "private"
+        is_public = indexer_type.lower() in ["public", "semi-public"]
+
+        # Log type detection
+        logger.debug(f"【{self.plugin_name}】索引器 {indexer_title} 类型：{indexer_type} -> {'公开' if is_public else '私有'}")
 
         # Build indexer dictionary (matching JackettExtend reference implementation exactly)
         return {
@@ -338,7 +347,7 @@ class JackettIndexer(_PluginBase):
             "name": f"{self.plugin_name}-{indexer_title}",
             "url": f"{self._host.rstrip('/')}/api/v2.0/indexers/{indexer_id}/results/torznab/",
             "domain": domain,
-            "public": True,
+            "public": is_public,
             "proxy": False,
         }
 
@@ -465,6 +474,11 @@ class JackettIndexer(_PluginBase):
 
             if not keyword:
                 logger.debug(f"【{self.plugin_name}】关键词为空，返回空结果")
+                return results
+
+            # Filter non-English keywords (Jackett/Prowlarr work best with English)
+            if not self._is_english_keyword(keyword):
+                logger.info(f"【{self.plugin_name}】检测到非英文关键词，跳过搜索：{keyword}")
                 return results
         except Exception as e:
             logger.error(f"【{self.plugin_name}】参数验证异常：{str(e)}\n{traceback.format_exc()}")
@@ -856,6 +870,49 @@ class JackettIndexer(_PluginBase):
             return date_str  # Return original if parsing fails
 
     @staticmethod
+    def _is_english_keyword(keyword: str) -> bool:
+        """
+        Check if keyword is primarily English (allow English letters, numbers, common symbols).
+
+        Args:
+            keyword: Search keyword to check
+
+        Returns:
+            True if keyword is English or contains significant English content, False otherwise
+        """
+        if not keyword:
+            return False
+
+        # Remove common punctuation and spaces
+        cleaned = re.sub(r'[.,!?;:()\[\]{}\s\-_]+', '', keyword)
+
+        if not cleaned:
+            return True  # Only punctuation, allow it
+
+        # Count different character types
+        ascii_count = sum(1 for c in cleaned if ord(c) < 128)
+        total_count = len(cleaned)
+
+        # If more than 50% are ASCII characters, consider it English
+        if total_count == 0:
+            return True
+
+        ascii_ratio = ascii_count / total_count
+
+        # Check for CJK (Chinese, Japanese, Korean) characters
+        cjk_count = sum(1 for c in cleaned if '\u4e00' <= c <= '\u9fff' or  # Chinese
+                       '\u3040' <= c <= '\u309f' or  # Hiragana
+                       '\u30a0' <= c <= '\u30ff' or  # Katakana
+                       '\uac00' <= c <= '\ud7af')    # Korean
+
+        # If contains significant CJK characters, reject
+        if cjk_count > 0 and cjk_count / total_count > 0.3:
+            return False
+
+        # Allow if majority is ASCII
+        return ascii_ratio > 0.5
+
+    @staticmethod
     def _format_imdb_id(imdb_id: Any) -> str:
         """
         Format IMDB ID to standard tt prefix format.
@@ -959,7 +1016,8 @@ class JackettIndexer(_PluginBase):
                                             'placeholder': '',
                                             'hint': '在Jackett界面点击扳手图标获取API密钥',
                                             'persistent-hint': True,
-                                            'type': 'password'
+                                            'type': 'password',
+                                            'append-inner-icon': 'mdi-eye-off'
                                         }
                                     }
                                 ]

@@ -15,6 +15,7 @@ import traceback
 from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
+import unicodedata
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -41,7 +42,7 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "Prowlarr索引器"
     plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "0.5.0"
+    plugin_version = "0.6.0"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "prowlarrindexer_"
@@ -291,13 +292,22 @@ class ProwlarrIndexer(_PluginBase):
         # Replace author part with indexer_id: "prowlarr_indexer.claude" -> "prowlarr_indexer.{indexer_id}"
         domain = self.PROWLARR_DOMAIN.replace(self.plugin_author.lower(), str(indexer_id))
 
+        # Detect if indexer is public or private
+        # Prowlarr privacy: 0 = public, 1 = private, 2 = semi-private
+        privacy = indexer.get("privacy", 1)
+        is_public = privacy == 0
+
+        # Log privacy detection
+        privacy_str = {0: "公开", 1: "私有", 2: "半私有"}.get(privacy, "未知")
+        logger.debug(f"【{self.plugin_name}】索引器 {indexer_name} 隐私级别：{privacy_str} (privacy={privacy})")
+
         # Build indexer dictionary (matching ProwlarrExtend reference implementation)
         return {
             "id": f"{self.plugin_name}-{indexer_name}",
             "name": f"{self.plugin_name}-{indexer_name}",
             "url": f"{self._host.rstrip('/')}/api/v1/indexer/{indexer_id}",
             "domain": domain,
-            "public": True,
+            "public": is_public,
             "proxy": False,
         }
 
@@ -424,6 +434,11 @@ class ProwlarrIndexer(_PluginBase):
 
             if not keyword:
                 logger.debug(f"【{self.plugin_name}】关键词为空，返回空结果")
+                return results
+
+            # Filter non-English keywords (Jackett/Prowlarr work best with English)
+            if not self._is_english_keyword(keyword):
+                logger.info(f"【{self.plugin_name}】检测到非英文关键词，跳过搜索：{keyword}")
                 return results
 
             # Get site name for logging
@@ -743,6 +758,49 @@ class ProwlarrIndexer(_PluginBase):
             return date_str  # Return original if parsing fails
 
     @staticmethod
+    def _is_english_keyword(keyword: str) -> bool:
+        """
+        Check if keyword is primarily English (allow English letters, numbers, common symbols).
+
+        Args:
+            keyword: Search keyword to check
+
+        Returns:
+            True if keyword is English or contains significant English content, False otherwise
+        """
+        if not keyword:
+            return False
+
+        # Remove common punctuation and spaces
+        cleaned = re.sub(r'[.,!?;:()\[\]{}\s\-_]+', '', keyword)
+
+        if not cleaned:
+            return True  # Only punctuation, allow it
+
+        # Count different character types
+        ascii_count = sum(1 for c in cleaned if ord(c) < 128)
+        total_count = len(cleaned)
+
+        # If more than 50% are ASCII characters, consider it English
+        if total_count == 0:
+            return True
+
+        ascii_ratio = ascii_count / total_count
+
+        # Check for CJK (Chinese, Japanese, Korean) characters
+        cjk_count = sum(1 for c in cleaned if '\u4e00' <= c <= '\u9fff' or  # Chinese
+                       '\u3040' <= c <= '\u309f' or  # Hiragana
+                       '\u30a0' <= c <= '\u30ff' or  # Katakana
+                       '\uac00' <= c <= '\ud7af')    # Korean
+
+        # If contains significant CJK characters, reject
+        if cjk_count > 0 and cjk_count / total_count > 0.3:
+            return False
+
+        # Allow if majority is ASCII
+        return ascii_ratio > 0.5
+
+    @staticmethod
     def _format_imdb_id(imdb_id: Any) -> str:
         """
         Format IMDB ID to standard tt prefix format.
@@ -846,7 +904,8 @@ class ProwlarrIndexer(_PluginBase):
                                             'placeholder': '',
                                             'hint': '在Prowlarr设置→通用→安全→API密钥中获取',
                                             'persistent-hint': True,
-                                            'type': 'password'
+                                            'type': 'password',
+                                            'append-inner-icon': 'mdi-eye-off'
                                         }
                                     }
                                 ]
