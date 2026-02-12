@@ -41,7 +41,7 @@ class JackettIndexer(_PluginBase):
     plugin_name = "Jackett索引器"
     plugin_desc = "集成Jackett索引器搜索，支持Torznab协议多站点搜索。"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "0.1.9"
+    plugin_version = "0.2.0"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "jackettindexer_"
@@ -289,6 +289,7 @@ class JackettIndexer(_PluginBase):
                     # Only add if we have required fields
                     if indexer["id"] and indexer["title"]:
                         indexers.append(indexer)
+                        logger.debug(f"【{self.plugin_name}】解析到索引器：id={indexer['id']}, title={indexer['title']}")
 
                 except Exception as e:
                     logger.debug(f"【{self.plugin_name}】解析索引器失败：{str(e)}")
@@ -319,10 +320,12 @@ class JackettIndexer(_PluginBase):
 
         # Build simplified indexer dictionary (matching reference implementation)
         # Only include fields that are in the reference implementation
+        # Note: url should be the main Jackett host, not the API endpoint
+        # This URL is used by MoviePilot for displaying site info, not for searching
         return {
             "id": f"{self.plugin_name}-{indexer_title}",
             "name": f"{self.plugin_name}-{indexer_title}",
-            "url": f"{self._host.rstrip('/')}/api/v2.0/indexers/{indexer_id}/results/torznab/",
+            "url": self._host,  # Use Jackett host as the site URL
             "domain": domain,
             "public": True,
             "proxy": self._proxy,
@@ -398,28 +401,45 @@ class JackettIndexer(_PluginBase):
         """
         results = []
 
-        # Debug: Log method call with all parameters
-        logger.debug(f"【{self.plugin_name}】search_torrents 被调用：site={site}, keyword={keyword}")
+        try:
+            # Debug: Log method call with all parameters
+            logger.debug(f"【{self.plugin_name}】search_torrents 被调用，site type={type(site)}, keyword={keyword}")
 
-        # Validate inputs first (matching reference implementation pattern)
-        if not site:
-            logger.debug(f"【{self.plugin_name}】站点参数为空，返回空结果")
+            # Validate inputs first (matching reference implementation pattern)
+            if site is None:
+                logger.debug(f"【{self.plugin_name}】站点参数为 None，返回空结果")
+                return results
+
+            if not isinstance(site, dict):
+                logger.error(f"【{self.plugin_name}】站点参数类型错误：期望 dict，得到 {type(site)}")
+                return results
+
+            if not keyword:
+                logger.debug(f"【{self.plugin_name}】关键词为空，返回空结果")
+                return results
+        except Exception as e:
+            logger.error(f"【{self.plugin_name}】参数验证异常：{str(e)}\n{traceback.format_exc()}")
             return results
 
-        if not keyword:
-            logger.debug(f"【{self.plugin_name}】关键词为空，返回空结果")
-            return results
+        try:
+            # Get site name for logging
+            site_name = site.get("name", "Unknown")
+            logger.debug(f"【{self.plugin_name}】站点名称：{site_name}, plugin_name: {self.plugin_name}")
 
-        # Get site name for logging
-        site_name = site.get("name", "Unknown")
-        logger.debug(f"【{self.plugin_name}】站点名称：{site_name}, plugin_name: {self.plugin_name}")
+            # Check if this site belongs to our plugin (matching reference implementation)
+            site_name_value = site.get("name", "")
+            if not site_name_value:
+                logger.debug(f"【{self.plugin_name}】站点名称为空，返回空结果")
+                return results
 
-        # Check if this site belongs to our plugin (matching reference implementation)
-        site_prefix = site.get("name", "").split("-")[0]
-        logger.debug(f"【{self.plugin_name}】站点前缀：{site_prefix}, 是否匹配：{site_prefix == self.plugin_name}")
+            site_prefix = site_name_value.split("-")[0] if "-" in site_name_value else site_name_value
+            logger.debug(f"【{self.plugin_name}】站点前缀：{site_prefix}, 是否匹配：{site_prefix == self.plugin_name}")
 
-        if site_prefix != self.plugin_name:
-            logger.debug(f"【{self.plugin_name}】站点不属于本插件，返回空结果")
+            if site_prefix != self.plugin_name:
+                logger.debug(f"【{self.plugin_name}】站点不属于本插件，返回空结果")
+                return results
+        except Exception as e:
+            logger.error(f"【{self.plugin_name}】站点名称处理异常：{str(e)}\n{traceback.format_exc()}")
             return results
 
         try:
@@ -444,7 +464,7 @@ class JackettIndexer(_PluginBase):
                 logger.warning(f"【{self.plugin_name}】从domain提取的索引器ID为空：{domain}")
                 return results
 
-            logger.debug(f"【{self.plugin_name}】从domain提取索引器ID：{indexer_id}")
+            logger.info(f"【{self.plugin_name}】从domain提取索引器ID：{indexer_id}，准备构建搜索URL")
 
             # Build search parameters
             search_params = self._build_search_params(
@@ -545,7 +565,8 @@ class JackettIndexer(_PluginBase):
             # Build URL for specific indexer
             url = f"{self._host}/api/v2.0/indexers/{indexer_id}/results/torznab/api"
 
-            logger.debug(f"【{self.plugin_name}】API请求：{url}?{urlencode(params)}")
+            logger.info(f"【{self.plugin_name}】API请求：{url}")
+            logger.debug(f"【{self.plugin_name}】搜索参数：{params}")
 
             response = RequestUtils(proxies=self._proxy).get_res(
                 url=url,

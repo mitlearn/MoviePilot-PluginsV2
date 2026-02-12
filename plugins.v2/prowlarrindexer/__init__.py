@@ -40,7 +40,7 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "Prowlarr索引器"
     plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "0.1.9"
+    plugin_version = "0.2.0"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "prowlarrindexer_"
@@ -250,6 +250,10 @@ class ProwlarrIndexer(_PluginBase):
             enabled_indexers = [idx for idx in indexers if idx.get("enable", False)]
             logger.info(f"【{self.plugin_name}】获取到 {len(enabled_indexers)} 个启用的索引器（总计 {len(indexers)} 个）")
 
+            # Debug log first few indexers
+            for idx in enabled_indexers[:3]:
+                logger.debug(f"【{self.plugin_name}】索引器示例：id={idx.get('id')}, name={idx.get('name')}")
+
             return enabled_indexers
 
         except Exception as e:
@@ -275,10 +279,12 @@ class ProwlarrIndexer(_PluginBase):
 
         # Build simplified indexer dictionary (matching reference implementation)
         # Only include fields that are in the reference implementation
+        # Note: url should be the main Prowlarr host, not the API endpoint
+        # This URL is used by MoviePilot for displaying site info, not for searching
         return {
             "id": f"{self.plugin_name}-{indexer_name}",
             "name": f"{self.plugin_name}-{indexer_name}",
-            "url": f"{self._host.rstrip('/')}/api/v1/indexer/{indexer_id}",
+            "url": self._host,  # Use Prowlarr host as the site URL
             "domain": domain,
             "public": True,
             "proxy": self._proxy,
@@ -354,28 +360,41 @@ class ProwlarrIndexer(_PluginBase):
         """
         results = []
 
-        # Debug: Log method call with all parameters
-        logger.debug(f"【{self.plugin_name}】search_torrents 被调用：site={site}, keyword={keyword}")
+        try:
+            # Debug: Log method call with all parameters
+            logger.debug(f"【{self.plugin_name}】search_torrents 被调用，site type={type(site)}, keyword={keyword}")
 
-        # Validate inputs first (matching reference implementation pattern)
-        if not site:
-            logger.debug(f"【{self.plugin_name}】站点参数为空，返回空结果")
-            return results
+            # Validate inputs first (matching reference implementation pattern)
+            if site is None:
+                logger.debug(f"【{self.plugin_name}】站点参数为 None，返回空结果")
+                return results
 
-        if not keyword:
-            logger.debug(f"【{self.plugin_name}】关键词为空，返回空结果")
-            return results
+            if not isinstance(site, dict):
+                logger.error(f"【{self.plugin_name}】站点参数类型错误：期望 dict，得到 {type(site)}")
+                return results
 
-        # Get site name for logging
-        site_name = site.get("name", "Unknown")
-        logger.debug(f"【{self.plugin_name}】站点名称：{site_name}, plugin_name: {self.plugin_name}")
+            if not keyword:
+                logger.debug(f"【{self.plugin_name}】关键词为空，返回空结果")
+                return results
 
-        # Check if this site belongs to our plugin (matching reference implementation)
-        site_prefix = site.get("name", "").split("-")[0]
-        logger.debug(f"【{self.plugin_name}】站点前缀：{site_prefix}, 是否匹配：{site_prefix == self.plugin_name}")
+            # Get site name for logging
+            site_name = site.get("name", "Unknown")
+            logger.debug(f"【{self.plugin_name}】站点名称：{site_name}, plugin_name: {self.plugin_name}")
 
-        if site_prefix != self.plugin_name:
-            logger.debug(f"【{self.plugin_name}】站点不属于本插件，返回空结果")
+            # Check if this site belongs to our plugin (matching reference implementation)
+            site_name_value = site.get("name", "")
+            if not site_name_value:
+                logger.debug(f"【{self.plugin_name}】站点名称为空，返回空结果")
+                return results
+
+            site_prefix = site_name_value.split("-")[0] if "-" in site_name_value else site_name_value
+            logger.debug(f"【{self.plugin_name}】站点前缀：{site_prefix}, 是否匹配：{site_prefix == self.plugin_name}")
+
+            if site_prefix != self.plugin_name:
+                logger.debug(f"【{self.plugin_name}】站点不属于本插件，返回空结果")
+                return results
+        except Exception as e:
+            logger.error(f"【{self.plugin_name}】参数验证异常：{str(e)}\n{traceback.format_exc()}")
             return results
 
         try:
@@ -401,7 +420,7 @@ class ProwlarrIndexer(_PluginBase):
                 return results
 
             indexer_id = int(indexer_id_str)
-            logger.debug(f"【{self.plugin_name}】从domain提取索引器ID：{indexer_id}")
+            logger.info(f"【{self.plugin_name}】从domain提取索引器ID：{indexer_id}，准备构建搜索URL")
 
             # Build search parameters
             search_params = self._build_search_params(
@@ -514,7 +533,8 @@ class ProwlarrIndexer(_PluginBase):
                 "Accept": "application/json"
             }
 
-            logger.debug(f"【{self.plugin_name}】API请求：{url}")
+            logger.info(f"【{self.plugin_name}】API请求：{url}")
+            logger.debug(f"【{self.plugin_name}】搜索参数：{params}")
 
             response = RequestUtils(
                 headers=headers,
