@@ -40,7 +40,7 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "Prowlarr索引器"
     plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "0.1.8"
+    plugin_version = "0.1.9"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "prowlarrindexer_"
@@ -390,12 +390,12 @@ class ProwlarrIndexer(_PluginBase):
                 return results
 
             # Parse indexer ID from domain (format: prowlarr_indexer.123)
-            domain_parts = domain.split(".")
-            if len(domain_parts) < 2:
-                logger.warning(f"【{self.plugin_name}】无法从domain解析索引器ID：{domain}")
+            # Use proper prefix removal to be consistent with jackettindexer
+            if not domain.startswith(f"{self.DOMAIN_PREFIX}."):
+                logger.warning(f"【{self.plugin_name}】domain格式不正确，应以 {self.DOMAIN_PREFIX}. 开头：{domain}")
                 return results
 
-            indexer_id_str = domain_parts[-1]  # Take last part
+            indexer_id_str = domain[len(self.DOMAIN_PREFIX) + 1:]  # Remove prefix
             if not indexer_id_str or not indexer_id_str.isdigit():
                 logger.warning(f"【{self.plugin_name}】从domain提取的索引器ID无效：{domain} -> {indexer_id_str}")
                 return results
@@ -413,6 +413,11 @@ class ProwlarrIndexer(_PluginBase):
 
             # Execute search API call
             api_results = self._search_prowlarr_api(search_params)
+
+            # Validate API results
+            if not isinstance(api_results, list):
+                logger.error(f"【{self.plugin_name}】API返回了非列表类型的结果：{type(api_results)}")
+                return results
 
             # Parse results to TorrentInfo
             for item in api_results:
@@ -520,9 +525,17 @@ class ProwlarrIndexer(_PluginBase):
                 logger.error(f"【{self.plugin_name}】搜索API请求失败：无响应")
                 return []
 
+            # Check if response has status_code attribute
+            if not hasattr(response, 'status_code'):
+                logger.error(f"【{self.plugin_name}】响应对象格式异常：缺少status_code属性")
+                return []
+
             if response.status_code != 200:
                 logger.error(f"【{self.plugin_name}】搜索API请求失败：HTTP {response.status_code}")
-                logger.debug(f"【{self.plugin_name}】响应内容：{response.text}")
+                # Safely get response text
+                response_text = getattr(response, 'text', '')
+                if response_text:
+                    logger.debug(f"【{self.plugin_name}】响应内容：{response_text}")
                 return []
 
             try:
@@ -553,6 +566,11 @@ class ProwlarrIndexer(_PluginBase):
             TorrentInfo object or None if parsing fails
         """
         try:
+            # Validate item is a dictionary
+            if not isinstance(item, dict):
+                logger.error(f"【{self.plugin_name}】种子信息格式错误：期望字典，得到 {type(item)}")
+                return None
+
             # Extract required fields
             title = item.get("title", "")
             if not title:

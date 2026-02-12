@@ -41,7 +41,7 @@ class JackettIndexer(_PluginBase):
     plugin_name = "Jackett索引器"
     plugin_desc = "集成Jackett索引器搜索，支持Torznab协议多站点搜索。"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "0.1.8"
+    plugin_version = "0.1.9"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "jackettindexer_"
@@ -433,13 +433,13 @@ class JackettIndexer(_PluginBase):
                 logger.warning(f"【{self.plugin_name}】站点缺少 domain 字段：{site_name}")
                 return results
 
-            # Parse indexer ID from domain (format: jackett_indexer.beyond-hd-api)
-            domain_parts = domain.split(".")
-            if len(domain_parts) < 2:
-                logger.warning(f"【{self.plugin_name}】无法从domain解析索引器ID：{domain}")
+            # Parse indexer ID from domain (format: jackett_indexer.indexer-id)
+            # Use proper prefix removal instead of split to handle indexer IDs with dots
+            if not domain.startswith(f"{self.DOMAIN_PREFIX}."):
+                logger.warning(f"【{self.plugin_name}】domain格式不正确，应以 {self.DOMAIN_PREFIX}. 开头：{domain}")
                 return results
 
-            indexer_id = domain_parts[-1]  # Take last part
+            indexer_id = domain[len(self.DOMAIN_PREFIX) + 1:]  # Remove prefix
             if not indexer_id:
                 logger.warning(f"【{self.plugin_name}】从domain提取的索引器ID为空：{domain}")
                 return results
@@ -458,6 +458,11 @@ class JackettIndexer(_PluginBase):
 
             if not xml_content:
                 logger.debug(f"【{self.plugin_name}】搜索未返回结果")
+                return results
+
+            # Additional safety check for xml_content type
+            if not isinstance(xml_content, str):
+                logger.error(f"【{self.plugin_name}】搜索返回了非字符串类型的结果：{type(xml_content)}")
                 return results
 
             # Parse XML results to TorrentInfo
@@ -552,12 +557,26 @@ class JackettIndexer(_PluginBase):
                 logger.error(f"【{self.plugin_name}】搜索API请求失败：无响应")
                 return None
 
-            if response.status_code != 200:
-                logger.error(f"【{self.plugin_name}】搜索API请求失败：HTTP {response.status_code}")
-                logger.debug(f"【{self.plugin_name}】响应内容：{response.text[:500]}")
+            # Check if response has status_code attribute
+            if not hasattr(response, 'status_code'):
+                logger.error(f"【{self.plugin_name}】响应对象格式异常：缺少status_code属性")
                 return None
 
-            return response.text
+            if response.status_code != 200:
+                logger.error(f"【{self.plugin_name}】搜索API请求失败：HTTP {response.status_code}")
+                # Safely get response text
+                response_text = getattr(response, 'text', '')
+                if response_text:
+                    logger.debug(f"【{self.plugin_name}】响应内容：{response_text[:500]}")
+                return None
+
+            # Safely get response text
+            xml_content = getattr(response, 'text', None)
+            if xml_content is None:
+                logger.error(f"【{self.plugin_name}】响应对象没有text属性")
+                return None
+
+            return xml_content
 
         except Exception as e:
             logger.error(f"【{self.plugin_name}】搜索API异常：{str(e)}\n{traceback.format_exc()}")
@@ -577,9 +596,19 @@ class JackettIndexer(_PluginBase):
         results = []
 
         try:
+            # Validate xml_content
+            if not xml_content or not isinstance(xml_content, str):
+                logger.error(f"【{self.plugin_name}】XML内容为空或类型错误")
+                return results
+
             # Parse XML
             dom_tree = xml.dom.minidom.parseString(xml_content)
             root_node = dom_tree.documentElement
+
+            # Safety check for root_node
+            if not root_node:
+                logger.error(f"【{self.plugin_name}】XML解析失败：无法获取根节点")
+                return results
 
             # Check for error response
             if root_node.tagName == "error":
