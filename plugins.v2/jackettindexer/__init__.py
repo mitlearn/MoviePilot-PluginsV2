@@ -41,7 +41,7 @@ class JackettIndexer(_PluginBase):
     plugin_name = "Jackett索引器"
     plugin_desc = "集成Jackett索引器搜索，支持Torznab协议多站点搜索。"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "0.1.6"
+    plugin_version = "0.1.8"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "jackettindexer_"
@@ -313,9 +313,9 @@ class JackettIndexer(_PluginBase):
         indexer_id = indexer.get("id", "")
         indexer_title = indexer.get("title", f"Indexer-{indexer_id}")
 
-        # Build domain identifier - simplified format matching reference implementation
-        # Format: jackett.{indexer_id}
-        domain = f"{self.DOMAIN_PREFIX}.{indexer_id}"
+        # Build domain identifier for MoviePilot compatibility
+        # Format: jackett.{indexer_id}.indexer
+        domain = f"{self.DOMAIN_PREFIX}.{indexer_id}.indexer"
 
         # Build indexer dictionary with necessary fields for MoviePilot compatibility
         return {
@@ -410,30 +410,54 @@ class JackettIndexer(_PluginBase):
         """
         results = []
 
+        # Debug: Log method call with all parameters
+        logger.debug(f"【{self.plugin_name}】search_torrents 被调用：site={site}, keyword={keyword}")
+
         # Validate inputs first (matching reference implementation pattern)
-        if not site or not keyword:
+        if not site:
+            logger.debug(f"【{self.plugin_name}】站点参数为空，返回空结果")
             return results
 
+        if not keyword:
+            logger.debug(f"【{self.plugin_name}】关键词为空，返回空结果")
+            return results
+
+        # Get site name for logging
+        site_name = site.get("name", "Unknown")
+        logger.debug(f"【{self.plugin_name}】站点名称：{site_name}, plugin_name: {self.plugin_name}")
+
         # Check if this site belongs to our plugin (matching reference implementation)
-        if site.get("name", "").split("-")[0] != self.plugin_name:
+        site_prefix = site.get("name", "").split("-")[0]
+        logger.debug(f"【{self.plugin_name}】站点前缀：{site_prefix}, 是否匹配：{site_prefix == self.plugin_name}")
+
+        if site_prefix != self.plugin_name:
+            logger.debug(f"【{self.plugin_name}】站点不属于本插件，返回空结果")
             return results
 
         try:
             # Log that method was called
-            site_name = site.get("name", "Unknown")
             logger.info(f"【{self.plugin_name}】开始搜索：站点={site_name}, 关键词={keyword}, 类型={mtype}, 页码={page}")
 
-            # Extract indexer ID from domain (format: jackett.indexer_id)
+            # Extract indexer ID from domain
+            # Domain format: jackett.{indexer_id}.indexer
             domain = site.get("domain", "")
             if not domain:
                 logger.warning(f"【{self.plugin_name}】站点缺少 domain 字段：{site_name}")
                 return results
 
-            # Parse indexer ID from domain
-            indexer_id = domain.split(".")[-1] if "." in domain else ""
-            if not indexer_id:
-                logger.warning(f"【{self.plugin_name}】无法从domain提取索引器ID：{domain}")
+            # Parse indexer ID from domain (split by ., take second part)
+            # jackett.beyond-hd-api.indexer -> beyond-hd-api
+            domain_parts = domain.split(".")
+            if len(domain_parts) < 3:
+                logger.warning(f"【{self.plugin_name}】无法从domain解析索引器ID：{domain}")
                 return results
+
+            indexer_id = domain_parts[1]
+            if not indexer_id:
+                logger.warning(f"【{self.plugin_name}】从domain提取的索引器ID为空：{domain}")
+                return results
+
+            logger.debug(f"【{self.plugin_name}】从domain提取索引器ID：{indexer_id}")
 
             # Build search parameters
             search_params = self._build_search_params(
