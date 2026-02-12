@@ -326,9 +326,63 @@ prowalarr/
    - 索引器列表页面
    - 友好的错误提示
 
+## 故障排查
+
+### 搜索无结果或出现错误
+
+如果遇到以下错误：
+```
+【ERROR】- indexer - ProwlarrIndexer-XXX 搜索出错：'NoneType' object has no attribute 'get'
+```
+
+**诊断步骤**：
+
+1. **检查日志中是否出现以下内容**：
+   ```
+   【INFO】【Prowlarr索引器】get_module 被调用，注册 search_torrents 方法
+   【DEBUG】【Prowlarr索引器】search_torrents 被调用：site={...}, keyword=xxx
+   ```
+
+2. **如果缺少上述日志**：
+   - 完全重启 MoviePilot：`docker restart moviepilot`
+   - 在 Web 界面禁用插件 → 保存 → 重新启用 → 立即运行一次 → 保存
+   - 检查插件版本是否为 0.1.2 或更高
+
+3. **如果看到 `search_torrents 被调用`**：
+   - 问题在于 API 调用，检查 Prowlarr/Jackett 地址和密钥
+   - 查看是否有网络连接错误日志
+
+4. **查看插件详情页**：
+   - 确认索引器已同步
+   - 查看域名列是否显示正确（如 `http://prowlarr.4.indexer`）
+
+### 查看数据页不显示新字段
+
+需要完全重启 MoviePilot 并清除浏览器缓存：
+```bash
+docker restart moviepilot
+```
+浏览器强制刷新：Ctrl+Shift+R (Windows/Linux) 或 Cmd+Shift+R (Mac)
+
+### 插件配置后自动禁用
+
+常见原因：
+- Prowlarr/Jackett 地址或 API 密钥错误
+- 服务器地址缺少 `http://` 或 `https://` 前缀
+- Prowlarr/Jackett 服务未运行
+- 网络连接问题
+
+查看 MoviePilot 日志获取详细错误信息。
+
 ## 版本历史
 
-详见 [CHANGELOG.md](CHANGELOG.md)
+| 版本 | 日期 | 更新内容 |
+|------|------|----------|
+| 0.1.4 | 2026-02-12 | 优化域名可读性：使用索引器名称生成域名；重写get_page使用标准表格；简化显示 |
+| 0.1.3 | 2026-02-12 | 修复站点注册问题：恢复torrents/parser字典结构确保add_indexer成功；增加详细注册日志 |
+| 0.1.2 | 2026-02-12 | 彻底修复模块劫持问题：将torrents和parser设置为None；添加type='indexer'标记；完善诊断日志 |
+| 0.1.1 | 2026-02-12 | 修复爬虫冲突：优化域名格式；改进查看数据页；增强日志记录 |
+| 0.1.0 | 2026-02-11 | 初始版本发布 |
 
 ## 许可证
 
@@ -347,16 +401,8 @@ prowalarr/
 - 发起 Pull Request
 - 参与讨论
 
-## 更新计划
-
-- [ ] 支持 API 速率限制
-- [ ] 支持自定义分类映射
-- [ ] 支持索引器分组
-- [ ] 支持搜索结果缓存
-- [ ] 支持更多元数据字段
-
 ---
 
-**版本**: 0.1.0
+**版本**: 0.1.4
 **作者**: Claude
-**最后更新**: 2026-02-11
+**最后更新**: 2026-02-12

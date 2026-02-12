@@ -9,6 +9,7 @@ Version: 0.1.0
 Author: Claude
 """
 
+import re
 import traceback
 import xml.dom.minidom
 from typing import List, Dict, Optional, Any, Tuple
@@ -39,7 +40,7 @@ class JackettIndexer(_PluginBase):
     plugin_name = "Jackett索引器"
     plugin_desc = "集成Jackett索引器搜索，支持Torznab协议多站点搜索。"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "0.1.2"
+    plugin_version = "0.1.4"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "jackettindexer_"
@@ -169,12 +170,19 @@ class JackettIndexer(_PluginBase):
                 try:
                     indexer_dict = self._build_indexer_dict(indexer)
                     domain = indexer_dict["domain"]
+                    name = indexer_dict["name"]
+
+                    logger.debug(f"【{self.plugin_name}】准备注册索引器：{name} (domain: {domain})")
 
                     # Register with sites helper
-                    self._sites_helper.add_indexer(domain, indexer_dict)
-                    self._indexers.append(indexer_dict)
+                    try:
+                        self._sites_helper.add_indexer(domain, indexer_dict)
+                        logger.info(f"【{self.plugin_name}】✅ 成功注册索引器：{name}")
+                    except Exception as reg_error:
+                        logger.error(f"【{self.plugin_name}】❌ add_indexer 失败：{name}, 错误：{str(reg_error)}")
+                        raise
 
-                    logger.debug(f"【{self.plugin_name}】已注册索引器：{indexer_dict['name']}")
+                    self._indexers.append(indexer_dict)
 
                 except Exception as e:
                     logger.error(f"【{self.plugin_name}】注册索引器失败：{str(e)}\n{traceback.format_exc()}")
@@ -293,11 +301,13 @@ class JackettIndexer(_PluginBase):
         indexer_id = indexer.get("id", "")
         indexer_title = indexer.get("title", f"Indexer-{indexer_id}")
 
-        # Build domain identifier (used for routing) - use clean indexer_id
-        domain = f"http://{self.DOMAIN_PREFIX}.{indexer_id.lower().replace(' ', '-')}.indexer"
+        # Build domain identifier using indexer title for readability
+        # Convert to lowercase and replace spaces/special chars with hyphens
+        indexer_slug = re.sub(r'[^a-z0-9]+', '-', indexer_title.lower()).strip('-')
+        domain = f"http://{self.DOMAIN_PREFIX}.{indexer_slug}.indexer"
 
         # Build complete indexer dictionary
-        # CRITICAL: This structure must prevent MoviePilot from using default spider
+        # CRITICAL: Must have correct structure for add_indexer to work
         return {
             # Basic identification
             "id": f"{self.plugin_name}-{indexer_id}",
@@ -315,24 +325,24 @@ class JackettIndexer(_PluginBase):
             "language": indexer.get("language", "en-US"),
             "protocol": "torrent",
 
-            # Critical: Mark as API-based indexer
-            "type": "indexer",  # Special type for API indexers
-
-            # Disable all spider/crawler features
+            # Disable rendering
             "render": False,
             "chrome": False,
-            "playwright": False,
 
-            # Explicitly disable site features
-            "rss": None,
-            "search": None,
-            "browse": None,
-            "torrents": None,  # No HTML parsing needed
-            "parser": None,  # No parser needed
-
-            # Cookie and headers - empty for API access
+            # Cookie and headers
             "cookie": "",
-            "ua": None,
+            "ua": "",
+
+            # IMPORTANT: torrents structure is required for registration
+            # Use empty/false values to prevent spider usage
+            "torrents": {
+                "list": {
+                    "selector": ""  # Empty selector prevents HTML parsing
+                }
+            },
+            "parser": {
+                "enabled": False  # Disable parser
+            }
         }
 
     def get_state(self) -> bool:
@@ -937,28 +947,10 @@ class JackettIndexer(_PluginBase):
 
     def get_page(self) -> List[dict]:
         """
-        Get plugin detail page for web UI.
-
-        Returns:
-            List of page elements
+        拼装插件详情页面，需要返回页面配置，同时附带数据
         """
-        # Build indexer status table
-        indexer_rows = []
-
-        if self._indexers:
-            for indexer in self._indexers:
-                indexer_rows.append({
-                    'site_id': indexer.get('id', 'N/A'),
-                    'name': indexer.get('indexer_title', 'Unknown'),
-                    'indexer_id': indexer.get('indexer_id', 'N/A'),
-                    'domain': indexer.get('domain', 'N/A'),
-                    'public': '是' if indexer.get('public', False) else '否',
-                    'language': indexer.get('language', 'en-US'),
-                })
-
         # Build status info
         status_info = []
-
         if self._enabled:
             status_info.append('状态：运行中')
         else:
@@ -968,6 +960,28 @@ class JackettIndexer(_PluginBase):
             status_info.append(f'最后同步：{self._last_update.strftime("%Y-%m-%d %H:%M:%S")}')
 
         status_info.append(f'索引器数量：{len(self._indexers)}')
+
+        # Build table rows
+        items = []
+        if self._indexers:
+            for site in self._indexers:
+                items.append({
+                    'component': 'tr',
+                    'content': [
+                        {
+                            'component': 'td',
+                            'text': site.get("indexer_title", "Unknown")
+                        },
+                        {
+                            'component': 'td',
+                            'text': site.get("domain", "N/A")
+                        },
+                        {
+                            'component': 'td',
+                            'text': '是' if site.get("public", False) else '否'
+                        }
+                    ]
+                })
 
         # Build page elements
         return [
@@ -995,23 +1009,52 @@ class JackettIndexer(_PluginBase):
                 'content': [
                     {
                         'component': 'VCol',
-                        'props': {'cols': 12},
+                        'props': {
+                            'cols': 12
+                        },
                         'content': [
                             {
                                 'component': 'VTable',
                                 'props': {
-                                    'hover': True,
-                                    'density': 'compact',
-                                    'headers': [
-                                        {'title': '站点ID', 'key': 'site_id'},
-                                        {'title': '索引器名称', 'key': 'name'},
-                                        {'title': '索引器ID', 'key': 'indexer_id'},
-                                        {'title': '域名', 'key': 'domain'},
-                                        {'title': '公开', 'key': 'public'},
-                                        {'title': '语言', 'key': 'language'},
-                                    ],
-                                    'items': indexer_rows
-                                }
+                                    'hover': True
+                                },
+                                'content': [
+                                    {
+                                        'component': 'thead',
+                                        'content': [
+                                            {
+                                                'component': 'tr',
+                                                'content': [
+                                                    {
+                                                        'component': 'th',
+                                                        'props': {
+                                                            'class': 'text-start ps-4'
+                                                        },
+                                                        'text': '索引器名称'
+                                                    },
+                                                    {
+                                                        'component': 'th',
+                                                        'props': {
+                                                            'class': 'text-start ps-4'
+                                                        },
+                                                        'text': '站点domain'
+                                                    },
+                                                    {
+                                                        'component': 'th',
+                                                        'props': {
+                                                            'class': 'text-start ps-4'
+                                                        },
+                                                        'text': '公开站点？'
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        'component': 'tbody',
+                                        'content': items
+                                    }
+                                ]
                             }
                         ]
                     }

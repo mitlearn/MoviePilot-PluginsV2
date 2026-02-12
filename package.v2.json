@@ -3,28 +3,32 @@
     "name": "Prowlarr索引器",
     "description": "集成Prowlarr索引器搜索，支持多站点统一搜索",
     "labels": "indexer,prowlarr,torrent,search",
-    "version": "0.1.2",
+    "version": "0.1.4",
     "icon": "Prowlarr.png",
     "author": "Claude",
     "level": 1,
     "history": {
       "v0.1.0": "初始版本发布，支持Prowlarr API搜索、自动同步索引器、分类过滤、定时同步",
       "v0.1.1": "修复爬虫冲突问题：添加render/chrome/rss/search/browse字段禁用爬虫；优化域名格式使用数字ID；增强日志记录；改进查看数据页展示站点ID、索引器ID、域名等完整信息",
-      "v0.1.2": "彻底修复模块劫持问题：将torrents和parser设置为None而非空对象；添加type='indexer'标记；添加get_module调用日志；优化初始化日志显示每个索引器的域名；完善诊断信息"
+      "v0.1.2": "彻底修复模块劫持问题：将torrents和parser设置为None而非空对象；添加type='indexer'标记；添加get_module调用日志；优化初始化日志显示每个索引器的域名；完善诊断信息",
+      "v0.1.3": "修复站点注册问题：恢复torrents和parser的字典结构(空selector和disabled)以确保add_indexer成功；增加注册成功/失败的详细日志；简化站点配置避免不必要字段",
+      "v0.1.4": "优化域名可读性：使用索引器名称代替数字ID生成域名(如prowlarr.morethan-tv.indexer)；重写get_page方法使用标准表格组件；简化表格显示仅保留核心字段"
     }
   },
   "JackettIndexer": {
     "name": "Jackett索引器",
     "description": "集成Jackett索引器搜索，支持Torznab协议多站点搜索",
     "labels": "indexer,jackett,torrent,search,torznab",
-    "version": "0.1.2",
+    "version": "0.1.4",
     "icon": "Jackett_A.png",
     "author": "Claude",
     "level": 1,
     "history": {
       "v0.1.0": "初始版本发布，支持Jackett Torznab API搜索、自动同步索引器、XML解析、定时同步",
       "v0.1.1": "修复爬虫冲突问题：添加render/chrome/rss/search/browse字段禁用爬虫；优化域名格式使用数字ID；增强日志记录；改进查看数据页展示站点ID、索引器ID、域名等完整信息",
-      "v0.1.2": "彻底修复模块劫持问题：将torrents和parser设置为None而非空对象；添加type='indexer'标记；添加get_module调用日志；优化初始化日志显示每个索引器的域名；完善诊断信息"
+      "v0.1.2": "彻底修复模块劫持问题：将torrents和parser设置为None而非空对象；添加type='indexer'标记；添加get_module调用日志；优化初始化日志显示每个索引器的域名；完善诊断信息",
+      "v0.1.3": "修复站点注册问题：恢复torrents和parser的字典结构(空selector和disabled)以确保add_indexer成功；增加注册成功/失败的详细日志；简化站点配置避免不必要字段",
+      "v0.1.4": "优化域名可读性：使用索引器名称代替数字ID生成域名(如jackett.morethan-tv.indexer)；重写get_page方法使用标准表格组件；简化表格显示仅保留核心字段"
     }
   }
 }
