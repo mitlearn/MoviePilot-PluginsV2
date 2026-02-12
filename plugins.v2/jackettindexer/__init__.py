@@ -41,7 +41,7 @@ class JackettIndexer(_PluginBase):
     plugin_name = "Jackett索引器"
     plugin_desc = "集成Jackett索引器搜索，支持Torznab协议多站点搜索。"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "0.2.0"
+    plugin_version = "0.2.3"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "jackettindexer_"
@@ -73,7 +73,8 @@ class JackettIndexer(_PluginBase):
         Args:
             config: Configuration dictionary from user settings
         """
-        logger.info(f"【{self.plugin_name}】开始初始化插件...")
+        logger.info(f"【{self.plugin_name}】★★★ 开始初始化插件 ★★★")
+        logger.debug(f"【{self.plugin_name}】收到配置：{config}")
 
         # Stop existing services
         self.stop_service()
@@ -132,20 +133,30 @@ class JackettIndexer(_PluginBase):
             logger.info(f"【{self.plugin_name}】开始获取索引器...")
             self._fetch_and_build_indexers()
 
-        # Register indexers to site management
+        # Register indexers to site management (delete and re-add to ensure latest config)
         registered_count = 0
+        updated_count = 0
         for indexer in self._indexers:
             domain = indexer.get("domain", "")
             site_info = self._sites_helper.get_indexer(domain)
-            if not site_info:
-                new_indexer = copy.deepcopy(indexer)
-                self._sites_helper.add_indexer(domain, new_indexer)
-                logger.info(f"【{self.plugin_name}】✅ 成功添加到站点管理：{indexer.get('name')} (domain: {domain})")
-                registered_count += 1
-            else:
-                logger.debug(f"【{self.plugin_name}】站点已存在，跳过：{indexer.get('name')} (domain: {domain})")
+            new_indexer = copy.deepcopy(indexer)
 
-        logger.info(f"【{self.plugin_name}】插件初始化完成，总计 {len(self._indexers)} 个索引器，新增 {registered_count} 个")
+            if site_info:
+                # Site exists, delete and re-add to ensure latest fields
+                try:
+                    self._sites_helper.delete_indexer(domain)
+                    self._sites_helper.add_indexer(domain, new_indexer)
+                    logger.info(f"【{self.plugin_name}】🔄 更新站点管理：{indexer.get('name')} (domain: {domain})")
+                    updated_count += 1
+                except Exception as e:
+                    logger.error(f"【{self.plugin_name}】更新站点失败：{indexer.get('name')}, 错误：{str(e)}")
+            else:
+                # New site, add it
+                self._sites_helper.add_indexer(domain, new_indexer)
+                logger.info(f"【{self.plugin_name}】✅ 新增到站点管理：{indexer.get('name')} (domain: {domain})")
+                registered_count += 1
+
+        logger.info(f"【{self.plugin_name}】插件初始化完成，总计 {len(self._indexers)} 个索引器，新增 {registered_count} 个，更新 {updated_count} 个")
 
     def _fetch_and_build_indexers(self) -> bool:
         """
@@ -329,6 +340,9 @@ class JackettIndexer(_PluginBase):
             "domain": domain,
             "public": True,
             "proxy": self._proxy,
+            "render": False,  # Don't use built-in rendering/parsing
+            "builtin": False,  # Mark as non-builtin indexer
+            "pri": 10,  # Priority
         }
 
     def get_state(self) -> bool:
@@ -373,6 +387,10 @@ class JackettIndexer(_PluginBase):
         Returns:
             Dictionary mapping method names to plugin methods
         """
+        if not self._enabled:
+            logger.debug(f"【{self.plugin_name}】get_module 被调用，但插件未启用，返回空字典")
+            return {}
+
         logger.info(f"【{self.plugin_name}】get_module 被调用，注册 search_torrents 方法")
         return {
             "search_torrents": self.search_torrents,
@@ -400,6 +418,9 @@ class JackettIndexer(_PluginBase):
             List of TorrentInfo objects
         """
         results = []
+
+        # First line of the method - log immediately
+        logger.info(f"【{self.plugin_name}】★★★ search_torrents 方法被调用 ★★★")
 
         try:
             # Debug: Log method call with all parameters
