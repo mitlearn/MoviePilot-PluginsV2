@@ -1,0 +1,26 @@
+{
+  "ProwlarrIndexer": {
+    "name": "ProwlarrIndexer",
+    "description": "聚合索引：通过 Prowlarr 检索站点资源",
+    "labels": "索引器,Prowlarr,Torznab",
+    "version": "0.1",
+    "icon": "Prowlarr.png",
+    "author": "prowlarr",
+    "level": 1,
+    "history": {
+      "v0.1": "初始版本，支持 Prowlarr JSON API 搜索，索引器自动发现与注册"
+    }
+  },
+  "JackettIndexer": {
+    "name": "JackettIndexer",
+    "description": "聚合索引：通过 Jackett 检索站点资源",
+    "labels": "索引器,Jackett,Torznab",
+    "version": "0.1",
+    "icon": "Jackett_A.png",
+    "author": "prowlarr",
+    "level": 1,
+    "history": {
+      "v0.1": "初始版本，支持 Jackett Torznab XML 搜索，索引器自动发现与注册"
+    }
+  }
+}
