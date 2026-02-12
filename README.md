@@ -59,6 +59,14 @@ https://github.com/<your-repo>/prowalarr/
 
 ## 更新日志
 
+### v0.4
+
+- **ProwlarrIndexer**: 域名改用 Prowlarr 数字 ID（`prowlarr_indexer.42`），搜索时直接从域名提取，移除 `_indexer_map` 间接查找
+- **JackettIndexer**: 参考 jtcymc/JackettExtend 重写索引器获取：login+cookies 认证，REST API 不带 apikey 参数
+- **两个插件**: `get_module()` 中 `search_torrents` 和 `async_search_torrents` 均指向同一同步函数，由框架自动 `run_in_threadpool` 包装
+- **两个插件**: 搜索入口新增顶层 `try/except` 带完整 traceback，确保异常不会被静默吞掉
+- **两个插件**: 搜索前打印 `DEBUG` 级别入口日志（包含 site_name、keyword），每个决策点均有日志输出
+
 ### v0.3
 
 - **JackettIndexer**: 修复索引器列表 JSON 解析失败，使用 session 登录获取 cookies 进行认证（参考 JackettExtend 实现），增强 JSON 解析兼容性（BOM 处理）

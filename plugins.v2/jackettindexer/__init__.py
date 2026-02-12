@@ -1,12 +1,9 @@
 # _*_ coding: utf-8 _*_
 """
-MoviePilot 插件：JackettIndexer
+MoviePilot 插件：JackettIndexer v0.4
 通过 Jackett Torznab API 搜索资源，将结果以 TorrentInfo 列表返回给 MoviePilot。
 """
 import copy
-import json
-import re
-import time
 import traceback
 import xml.dom.minidom
 from datetime import datetime, timedelta
@@ -30,23 +27,21 @@ from app.utils.string import StringUtils
 
 class JackettIndexer(_PluginBase):
     """
-    Jackett 索引器插件
-    通过 get_module() 劫持 search_torrents / async_search_torrents 方法，
-    将 Jackett Torznab 搜索结果注入 MoviePilot 搜索链。
+    Jackett 索引器插件 v0.4
     """
 
     # ==================== 插件元数据 ====================
     plugin_name = "JackettIndexer"
     plugin_desc = "聚合索引：通过 Jackett 检索站点资源"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "0.3"
+    plugin_version = "0.4"
     plugin_author = "prowlarr"
     author_url = "https://github.com/prowlarr"
     plugin_config_prefix = "jackett_indexer_"
     plugin_order = 15
     auth_level = 1
 
-    # 域名标识前缀
+    # 域名前缀，域名格式: jackett_indexer.{indexer_id}
     _domain_prefix = "jackett_indexer"
 
     # ==================== 生命周期 ====================
@@ -62,15 +57,12 @@ class JackettIndexer(_PluginBase):
         self._onlyonce: bool = False
         self._cron: str = "0 0 */24 * *"
         self._timeout: int = 30
-        self._max_retries: int = 3
         self._indexers: list = []
-        self._indexer_map: dict = {}
         self._sites_helper: Optional[SitesHelper] = None
 
     def init_plugin(self, config: dict = None):
         self._sites_helper = SitesHelper()
         self._indexers = []
-        self._indexer_map = {}
 
         if config:
             self._enabled = config.get("enabled", False)
@@ -81,7 +73,6 @@ class JackettIndexer(_PluginBase):
             self._onlyonce = config.get("onlyonce", False)
             self._cron = config.get("cron") or "0 0 */24 * *"
             self._timeout = int(config.get("timeout", 30))
-            self._max_retries = int(config.get("max_retries", 3))
 
         self.stop_service()
 
@@ -90,7 +81,6 @@ class JackettIndexer(_PluginBase):
 
         self._scheduler = BackgroundScheduler(timezone=settings.TZ)
         if self._cron:
-            logger.info(f"[{self.plugin_name}] 索引更新服务启动，周期：{self._cron}")
             self._scheduler.add_job(self._refresh_indexers, CronTrigger.from_crontab(self._cron))
 
         if self._onlyonce:
@@ -100,16 +90,15 @@ class JackettIndexer(_PluginBase):
                 run_date=datetime.now(tz=pytz.timezone(settings.TZ)) + timedelta(seconds=3),
             )
             self._onlyonce = False
-            self._save_config()
+            self.__update_config()
 
         if self._scheduler.get_jobs():
             self._scheduler.print_jobs()
             self._scheduler.start()
 
+        # 同步刷新索引器并注册
         if not self._indexers:
             self._refresh_indexers()
-
-        self._register_indexers()
 
     def get_state(self) -> bool:
         return self._enabled
@@ -129,26 +118,14 @@ class JackettIndexer(_PluginBase):
     def get_module(self) -> Dict[str, Any]:
         return {
             "search_torrents": self.search_torrents,
-            "async_search_torrents": self.async_search_torrents,
+            "async_search_torrents": self.search_torrents,
         }
-
-    async def async_search_torrents(
-        self,
-        site: dict,
-        keyword: str = None,
-        mtype: Optional[MediaType] = None,
-        page: Optional[int] = 0,
-    ) -> List[TorrentInfo]:
-        """
-        异步搜索入口，MoviePilot 搜索链实际调用此方法。
-        """
-        return self.search_torrents(site=site, keyword=keyword, mtype=mtype, page=page)
 
     # ==================== 搜索逻辑 ====================
 
     def search_torrents(
         self,
-        site: dict,
+        site: dict = None,
         keyword: str = None,
         mtype: Optional[MediaType] = None,
         page: Optional[int] = 0,
@@ -156,36 +133,53 @@ class JackettIndexer(_PluginBase):
         """
         MoviePilot 搜索链回调。仅处理本插件注册的站点。
         """
-        if not site or not keyword:
+        # --- 入口日志 ---
+        try:
+            _site_name = site.get("name", "") if isinstance(site, dict) else str(site)
+        except Exception:
+            _site_name = "(unknown)"
+        logger.debug(f"[{self.plugin_name}] search_torrents 调用: "
+                     f"site_name={_site_name}, keyword={keyword}, mtype={mtype}")
+
+        try:
+            if not site or not keyword:
+                return []
+
+            site_name = site.get("name", "") if isinstance(site, dict) else ""
+            if site_name.split("-")[0] != self.plugin_name:
+                return []
+
+            # 从域名提取 Jackett indexer ID
+            domain = site.get("domain", "")
+            indexer_id = domain.split(".")[-1] if domain else ""
+            if not indexer_id:
+                logger.warning(f"[{self.plugin_name}] 无法从域名提取 indexer ID: "
+                               f"site={site_name}, domain={domain}")
+                return []
+
+            categories = self._get_categories(mtype)
+            params = {
+                "apikey": self._api_key,
+                "t": "search",
+                "q": keyword,
+                "cat": ",".join(map(str, categories)),
+            }
+            query_string = urlencode(params, doseq=True, quote_via=quote_plus)
+            api_url = (f"{self._host}/api/v2.0/indexers/{indexer_id}"
+                       f"/results/torznab/?{query_string}")
+
+            logger.info(f"[{self.plugin_name}] 开始检索 \"{site_name}\"，"
+                        f"indexer_id={indexer_id}，关键词=\"{keyword}\"")
+            logger.info(f"[{self.plugin_name}] Torznab API: {api_url}")
+
+            results = self._parse_torznab_xml(api_url, site_name=site_name)
+            logger.info(f"[{self.plugin_name}] {site_name} 返回 {len(results)} 条资源")
+            return results
+
+        except Exception as e:
+            logger.error(f"[{self.plugin_name}] search_torrents 异常: "
+                         f"{e}\n{traceback.format_exc()}")
             return []
-        site_name = site.get("name", "")
-        if not site_name.startswith(self.plugin_name):
-            return []
-
-        logger.info(f"[{self.plugin_name}] 搜索 -> 站点: {site_name}, "
-                     f"关键词: {keyword}, 类型: {mtype}, 页码: {page}")
-
-        indexer_id = self._extract_indexer_id(site)
-        if not indexer_id:
-            logger.warning(f"[{self.plugin_name}] 无法提取 indexer ID: {site_name}, "
-                           f"domain={site.get('domain')}, map_keys={list(self._indexer_map.keys())}")
-            return []
-
-        categories = self._get_categories(mtype)
-        params = {
-            "apikey": self._api_key,
-            "t": "search",
-            "q": keyword,
-            "cat": ",".join(map(str, categories)),
-        }
-        query_string = urlencode(params, doseq=True, quote_via=quote_plus)
-        api_url = f"{self._host}/api/v2.0/indexers/{indexer_id}/results/torznab/?{query_string}"
-
-        logger.info(f"[{self.plugin_name}] Torznab 请求: {api_url}")
-
-        results = self._parse_torznab_xml(api_url, site_name=site_name)
-        logger.info(f"[{self.plugin_name}] {site_name} 返回 {len(results)} 条资源")
-        return results
 
     # ==================== Torznab XML 解析 ====================
 
@@ -193,11 +187,19 @@ class JackettIndexer(_PluginBase):
         if not url:
             return []
 
-        response = self._request_with_retry(url)
-        if not response or not response.text:
+        try:
+            ret = RequestUtils(timeout=self._timeout).get_res(
+                url, proxies=settings.PROXY if self._proxy else None
+            )
+        except Exception as e:
+            logger.error(f"[{self.plugin_name}] Torznab 请求异常: {e}")
             return []
 
-        text = response.text.strip()
+        if not ret or not ret.text:
+            logger.warning(f"[{self.plugin_name}] Torznab 无响应: {url}")
+            return []
+
+        text = ret.text.strip()
         if "<error " in text:
             try:
                 dom = xml.dom.minidom.parseString(text)
@@ -216,7 +218,7 @@ class JackettIndexer(_PluginBase):
             root_node = dom_tree.documentElement
             items = root_node.getElementsByTagName("item")
         except Exception as e:
-            logger.error(f"[{self.plugin_name}] Torznab XML 解析失败: {e}")
+            logger.error(f"[{self.plugin_name}] XML 解析失败: {e}")
             return []
 
         for item in items:
@@ -233,7 +235,8 @@ class JackettIndexer(_PluginBase):
 
                 description = self._tag_value(item, "description") or ""
                 size = self._safe_int(self._tag_attr(item, "enclosure", "length"), 0)
-                page_url = self._tag_value(item, "comments") or self._tag_value(item, "guid") or ""
+                page_url = (self._tag_value(item, "comments")
+                            or self._tag_value(item, "guid") or "")
                 pubdate = self._tag_value(item, "pubDate") or ""
                 if pubdate:
                     pubdate = StringUtils.unify_datetime_str(pubdate)
@@ -242,7 +245,6 @@ class JackettIndexer(_PluginBase):
                 peers = 0
                 grabs = 0
                 imdbid = ""
-                magneturl = ""
                 downloadvolumefactor = None
                 uploadvolumefactor = None
 
@@ -263,15 +265,10 @@ class JackettIndexer(_PluginBase):
                             size = self._safe_int(value, 0)
                     elif name == "imdbid":
                         imdbid = value or ""
-                    elif name == "magneturl":
-                        magneturl = value or ""
                     elif name == "downloadvolumefactor":
                         downloadvolumefactor = self._safe_float(value)
                     elif name == "uploadvolumefactor":
                         uploadvolumefactor = self._safe_float(value)
-
-                if not magneturl and enclosure and enclosure.startswith("magnet:"):
-                    magneturl = enclosure
 
                 torrents.append(TorrentInfo(
                     site_name=site_name,
@@ -297,13 +294,23 @@ class JackettIndexer(_PluginBase):
     # ==================== 索引器管理 ====================
 
     def _refresh_indexers(self):
+        """
+        获取 Jackett 索引器列表（参考 jtcymc/JackettExtend 实现）：
+        1. 登录 Jackett 获取 session cookies
+        2. 使用 cookies 请求 REST API 获取索引器列表
+        """
         if not self._api_key or not self._host:
             logger.warning(f"[{self.plugin_name}] 地址或 API Key 未配置")
             return
 
-        headers = self._build_headers()
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "User-Agent": settings.USER_AGENT,
+            "X-Api-Key": self._api_key,
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+        }
 
-        # 始终尝试登录获取 session cookie（参考 jtcymc 实现）
+        # Step 1: 登录获取 session cookies
         cookie = None
         session = requests.session()
         try:
@@ -316,20 +323,20 @@ class JackettIndexer(_PluginBase):
             )
             if login_res and session.cookies:
                 cookie = session.cookies.get_dict()
-                logger.debug(f"[{self.plugin_name}] Jackett 登录成功，获取到 cookie")
+                logger.info(f"[{self.plugin_name}] Jackett 登录成功，获取到 cookie")
             else:
-                logger.debug(f"[{self.plugin_name}] Jackett 登录未返回 cookie，继续使用 API Key")
+                logger.warning(f"[{self.plugin_name}] Jackett 登录未返回 cookie")
         except Exception as e:
-            logger.debug(f"[{self.plugin_name}] Jackett 登录异常（忽略）: {e}")
+            logger.warning(f"[{self.plugin_name}] Jackett 登录异常（忽略）: {e}")
 
-        # 使用 cookie + apikey 双重认证
-        url = f"{self._host}/api/v2.0/indexers?configured=true&apikey={self._api_key}"
-        logger.info(f"[{self.plugin_name}] 索引器列表请求: {url}")
+        # Step 2: 使用 cookies 请求索引器列表（不在 URL 中带 apikey，参考 jtcymc 实现）
+        indexer_url = f"{self._host}/api/v2.0/indexers?configured=true"
+        logger.info(f"[{self.plugin_name}] 索引器列表请求: {indexer_url}")
 
         try:
             ret = RequestUtils(
                 headers=headers, cookies=cookie, timeout=self._timeout,
-            ).get_res(url, proxies=settings.PROXY if self._proxy else None)
+            ).get_res(indexer_url, proxies=settings.PROXY if self._proxy else None)
         except Exception as e:
             logger.error(f"[{self.plugin_name}] 索引器请求异常: {e}")
             return
@@ -338,57 +345,56 @@ class JackettIndexer(_PluginBase):
             logger.warning(f"[{self.plugin_name}] 索引器请求无响应")
             return
 
-        logger.debug(f"[{self.plugin_name}] 索引器响应状态码: {ret.status_code}, "
+        logger.debug(f"[{self.plugin_name}] 响应状态码: {ret.status_code}, "
                      f"Content-Type: {ret.headers.get('Content-Type', 'unknown')}")
 
-        # 健壮的 JSON 解析：先尝试 ret.json()，失败后用 json.loads(content)
-        raw_indexers = None
+        if ret.status_code != 200:
+            logger.warning(f"[{self.plugin_name}] 索引器 HTTP {ret.status_code}")
+            # 尝试打印响应体前200字符帮助调试
+            body = ret.text[:200] if ret.text else "(empty)"
+            logger.debug(f"[{self.plugin_name}] 响应内容: {body}")
+            return
+
+        # 解析 JSON
         try:
             raw_indexers = ret.json()
         except Exception:
-            pass
-
-        if raw_indexers is None:
+            # 尝试 utf-8-sig（BOM 处理）
             try:
+                import json
                 raw_indexers = json.loads(ret.content.decode("utf-8-sig"))
             except Exception:
-                pass
-
-        if raw_indexers is None:
-            body_preview = ret.text[:500] if ret.text else "(empty)"
-            logger.error(f"[{self.plugin_name}] 索引器响应 JSON 解析失败，"
-                         f"状态码: {ret.status_code}, 响应前500字符: {body_preview}")
-            return
+                body = ret.text[:500] if ret.text else "(empty)"
+                logger.error(f"[{self.plugin_name}] JSON 解析失败，响应前500字符: {body}")
+                return
 
         if not isinstance(raw_indexers, list):
-            logger.warning(f"[{self.plugin_name}] 返回数据非列表: type={type(raw_indexers).__name__}")
+            logger.warning(f"[{self.plugin_name}] 返回非列表: type={type(raw_indexers).__name__}")
             return
 
         self._indexers = []
-        self._indexer_map = {}
         for v in raw_indexers:
             indexer_id = v.get("id")
             indexer_name = v.get("name")
             if not indexer_id or not indexer_name:
                 continue
 
-            safe_name = self._sanitize_name(indexer_name)
-            self._indexer_map[safe_name] = indexer_id
-
+            # 域名使用 Jackett indexer ID（字符串，如 "beyondhd"）
+            domain = f"{self._domain_prefix}.{indexer_id}"
             self._indexers.append({
                 "id": f"{self.plugin_name}-{indexer_name}",
                 "name": f"{self.plugin_name}-{indexer_name}",
-                "domain": f"{self._domain_prefix}.{safe_name}",
+                "domain": domain,
                 "url": f"{self._host}/api/v2.0/indexers/{indexer_id}/results/torznab/",
                 "public": True,
                 "proxy": self._proxy,
-                "torrents": {"list": {}, "fields": {}},
             })
 
-        logger.info(f"[{self.plugin_name}] 获取到 {len(self._indexers)} 个索引器")
+        logger.info(f"[{self.plugin_name}] 获取到 {len(self._indexers)} 个索引器:")
         for idx in self._indexers:
-            logger.info(f"[{self.plugin_name}]   - {idx['name']} (id={idx['id']}, domain={idx['domain']})")
+            logger.info(f"[{self.plugin_name}]   - {idx['name']} (domain={idx['domain']})")
 
+        # 注册到 SitesHelper
         self._register_indexers()
 
     def _register_indexers(self):
@@ -401,20 +407,24 @@ class JackettIndexer(_PluginBase):
             existing = self._sites_helper.get_indexer(domain)
             if not existing:
                 self._sites_helper.add_indexer(domain, copy.deepcopy(indexer))
-                logger.info(f"[{self.plugin_name}] 注册索引器: {indexer.get('name')} -> {domain}")
+                logger.info(f"[{self.plugin_name}] 注册: {indexer.get('name')} -> {domain}")
             else:
-                logger.debug(f"[{self.plugin_name}] 索引器已存在: {domain}")
+                logger.debug(f"[{self.plugin_name}] 已存在: {domain}")
 
     # ==================== 测试连接 ====================
 
     def _test_connection(self) -> dict:
-        """测试 Jackett 连接，返回状态信息"""
         if not self._host or not self._api_key:
             return {"status": "error", "message": "地址或 API Key 未配置"}
 
-        headers = self._build_headers()
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "User-Agent": settings.USER_AGENT,
+            "X-Api-Key": self._api_key,
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+        }
 
-        # 尝试登录
+        # 登录
         cookie = None
         session = requests.session()
         try:
@@ -429,7 +439,7 @@ class JackettIndexer(_PluginBase):
         except Exception:
             pass
 
-        url = f"{self._host}/api/v2.0/indexers?configured=true&apikey={self._api_key}"
+        url = f"{self._host}/api/v2.0/indexers?configured=true"
         try:
             ret = RequestUtils(
                 headers=headers, cookies=cookie, timeout=self._timeout,
@@ -448,50 +458,14 @@ class JackettIndexer(_PluginBase):
             return {"status": "ok", "message": f"连接成功，发现 {count} 个索引器"}
         except Exception:
             try:
+                import json
                 data = json.loads(ret.content.decode("utf-8-sig"))
                 count = len(data) if isinstance(data, list) else 0
                 return {"status": "ok", "message": f"连接成功(BOM)，发现 {count} 个索引器"}
             except Exception as e:
-                body_preview = ret.text[:200] if ret.text else "(empty)"
-                return {"status": "error", "message": f"JSON 解析失败: {e}, 响应: {body_preview}"}
-
-    # ==================== HTTP 工具 ====================
-
-    def _build_headers(self) -> dict:
-        return {
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "User-Agent": settings.USER_AGENT,
-            "X-Api-Key": self._api_key,
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-        }
-
-    def _request_with_retry(self, url: str, headers: Optional[dict] = None) -> Optional[requests.Response]:
-        proxies = settings.PROXY if self._proxy else None
-        last_error = None
-
-        for attempt in range(1, self._max_retries + 1):
-            try:
-                logger.debug(f"[{self.plugin_name}] HTTP GET (第{attempt}次): {url}")
-                ret = RequestUtils(headers=headers, timeout=self._timeout).get_res(url, proxies=proxies)
-                if ret is not None:
-                    logger.debug(f"[{self.plugin_name}] 状态码: {ret.status_code}")
-                    if ret.status_code == 200:
-                        return ret
-                    logger.warning(f"[{self.plugin_name}] HTTP {ret.status_code} (第{attempt}次)")
-                else:
-                    logger.warning(f"[{self.plugin_name}] 无响应 (第{attempt}次)")
-            except Exception as e:
-                last_error = e
-                logger.warning(f"[{self.plugin_name}] 请求异常 (第{attempt}次): {e}")
-
-            if attempt < self._max_retries:
-                wait = 2 ** attempt
-                logger.debug(f"[{self.plugin_name}] {wait}秒后重试...")
-                time.sleep(wait)
-
-        logger.error(f"[{self.plugin_name}] 请求失败，已重试 {self._max_retries} 次: {url}"
-                     + (f" 最后错误: {last_error}" if last_error else ""))
-        return None
+                body = ret.text[:200] if ret.text else "(empty)"
+                return {"status": "error",
+                        "message": f"JSON 解析失败: {e}, 响应: {body}"}
 
     # ==================== 辅助方法 ====================
 
@@ -513,24 +487,6 @@ class JackettIndexer(_PluginBase):
         if mtype == MediaType.TV:
             return [5000]
         return [2000, 5000]
-
-    @staticmethod
-    def _sanitize_name(name: str) -> str:
-        """将索引器名称转为安全的域名片段"""
-        s = re.sub(r'[^a-zA-Z0-9_-]', '_', name.strip().lower())
-        s = re.sub(r'_+', '_', s).strip('_')
-        return s or "unknown"
-
-    def _extract_indexer_id(self, site: dict) -> str:
-        """域名格式: jackett_indexer.<sanitized_name>，通过 _indexer_map 映射回真实 ID"""
-        domain = site.get("domain", "")
-        if not domain:
-            return ""
-        parts = domain.split(".", 1)
-        if len(parts) < 2:
-            return ""
-        key = parts[1]
-        return str(self._indexer_map.get(key, ""))
 
     @staticmethod
     def _tag_value(node, tag: str) -> str:
@@ -560,7 +516,7 @@ class JackettIndexer(_PluginBase):
         except (ValueError, TypeError):
             return default
 
-    def _save_config(self):
+    def __update_config(self):
         self.update_config({
             "enabled": self._enabled,
             "host": self._host,
@@ -570,7 +526,6 @@ class JackettIndexer(_PluginBase):
             "onlyonce": self._onlyonce,
             "cron": self._cron,
             "timeout": self._timeout,
-            "max_retries": self._max_retries,
         })
 
     # ==================== 插件接口 ====================
@@ -619,7 +574,6 @@ class JackettIndexer(_PluginBase):
                                     "props": {
                                         "model": "onlyonce",
                                         "label": "立即刷新索引",
-                                        "hint": "打开后立即获取索引器列表",
                                     },
                                 }],
                             },
@@ -637,7 +591,6 @@ class JackettIndexer(_PluginBase):
                                         "model": "host",
                                         "label": "Jackett 地址",
                                         "placeholder": "http://127.0.0.1:9117",
-                                        "hint": "Jackett 访问地址，需先在 Jackett 中添加 indexer",
                                     },
                                 }],
                             },
@@ -649,7 +602,6 @@ class JackettIndexer(_PluginBase):
                                     "props": {
                                         "model": "api_key",
                                         "label": "API Key",
-                                        "hint": "Jackett 管理界面右上角复制",
                                     },
                                 }],
                             },
@@ -673,20 +625,19 @@ class JackettIndexer(_PluginBase):
                         "content": [
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
+                                "props": {"cols": 12, "md": 6},
                                 "content": [{
                                     "component": "VTextField",
                                     "props": {
                                         "model": "cron",
                                         "label": "索引更新周期",
                                         "placeholder": "0 0 */24 * *",
-                                        "hint": "Cron 表达式，默认每24小时",
                                     },
                                 }],
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
+                                "props": {"cols": 12, "md": 6},
                                 "content": [{
                                     "component": "VTextField",
                                     "props": {
@@ -694,19 +645,6 @@ class JackettIndexer(_PluginBase):
                                         "label": "超时(秒)",
                                         "type": "number",
                                         "placeholder": "30",
-                                    },
-                                }],
-                            },
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
-                                "content": [{
-                                    "component": "VTextField",
-                                    "props": {
-                                        "model": "max_retries",
-                                        "label": "重试次数",
-                                        "type": "number",
-                                        "placeholder": "3",
                                     },
                                 }],
                             },
@@ -723,11 +661,12 @@ class JackettIndexer(_PluginBase):
                                     "type": "info",
                                     "variant": "tonal",
                                     "text": "使用说明：\n"
-                                            "1. 填写 Jackett 地址、API Key 和管理密码，开启「立即刷新索引」\n"
-                                            "2. 在「查看数据」页面查看已注册的索引器及其 ID\n"
-                                            "3. 到 MoviePilot「搜索设置」中勾选以 JackettIndexer 开头的站点\n"
-                                            "4. 若更新插件后域名变更，需重新在搜索设置中勾选\n"
-                                            "5. 可通过 API /test 测试连接：/api/v1/plugin/JackettIndexer/test",
+                                            "1. 填写 Jackett 地址、API Key 和管理密码，"
+                                            "开启「立即刷新索引」\n"
+                                            "2. 在「查看数据」页面确认索引器已注册\n"
+                                            "3. 到 MoviePilot「搜索设置」中勾选以 "
+                                            "JackettIndexer 开头的站点\n"
+                                            "4. 若更新插件后域名变更，需重新在搜索设置中勾选",
                                 },
                             }],
                         }],
@@ -743,7 +682,6 @@ class JackettIndexer(_PluginBase):
             "onlyonce": False,
             "cron": "0 0 */24 * *",
             "timeout": 30,
-            "max_retries": 3,
         }
 
     def get_page(self) -> List[dict]:
@@ -773,7 +711,7 @@ class JackettIndexer(_PluginBase):
                 "content": [
                     {"component": "td", "text": site.get("id", "")},
                     {"component": "td", "text": site.get("name", "")},
-                    {"component": "td", "text": f"https://{site.get('domain', '')}"},
+                    {"component": "td", "text": site.get("domain", "")},
                     {"component": "td", "text": "是" if site.get("public") else "否"},
                 ],
             })
@@ -807,10 +745,14 @@ class JackettIndexer(_PluginBase):
                             "content": [{
                                 "component": "tr",
                                 "content": [
-                                    {"component": "th", "props": {"class": "text-start ps-4"}, "text": "站点 ID"},
-                                    {"component": "th", "props": {"class": "text-start ps-4"}, "text": "索引器名称"},
-                                    {"component": "th", "props": {"class": "text-start ps-4"}, "text": "站点 Domain"},
-                                    {"component": "th", "props": {"class": "text-start ps-4"}, "text": "公开"},
+                                    {"component": "th", "props": {"class": "text-start ps-4"},
+                                     "text": "站点 ID"},
+                                    {"component": "th", "props": {"class": "text-start ps-4"},
+                                     "text": "索引器名称"},
+                                    {"component": "th", "props": {"class": "text-start ps-4"},
+                                     "text": "域名"},
+                                    {"component": "th", "props": {"class": "text-start ps-4"},
+                                     "text": "公开"},
                                 ],
                             }],
                         },
