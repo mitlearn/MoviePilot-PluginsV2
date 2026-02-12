@@ -133,6 +133,7 @@ class JackettIndexer(_PluginBase):
             self._fetch_and_build_indexers()
 
         # Register indexers to site management
+        registered_count = 0
         for indexer in self._indexers:
             domain = indexer.get("domain", "")
             site_info = self._sites_helper.get_indexer(domain)
@@ -140,8 +141,11 @@ class JackettIndexer(_PluginBase):
                 new_indexer = copy.deepcopy(indexer)
                 self._sites_helper.add_indexer(domain, new_indexer)
                 logger.info(f"【{self.plugin_name}】✅ 成功添加到站点管理：{indexer.get('name')} (domain: {domain})")
+                registered_count += 1
+            else:
+                logger.debug(f"【{self.plugin_name}】站点已存在，跳过：{indexer.get('name')} (domain: {domain})")
 
-        logger.info(f"【{self.plugin_name}】插件初始化完成，共注册 {len(self._indexers)} 个索引器")
+        logger.info(f"【{self.plugin_name}】插件初始化完成，总计 {len(self._indexers)} 个索引器，新增 {registered_count} 个")
 
     def _fetch_and_build_indexers(self) -> bool:
         """
@@ -307,59 +311,21 @@ class JackettIndexer(_PluginBase):
             MoviePilot compatible indexer dictionary
         """
         indexer_id = indexer.get("id", "")
-        indexer_title = indexer.get("title", f"Indexer-{indexer_id}")
+        indexer_name = indexer.get("title", f"Indexer-{indexer_id}")
 
-        # Build domain identifier using indexer title for readability
-        # Convert to lowercase and replace spaces/special chars with hyphens
-        indexer_slug = re.sub(r'[^a-z0-9]+', '-', indexer_title.lower()).strip('-')
-        domain = f"http://{self.DOMAIN_PREFIX}.{indexer_slug}.indexer"
+        # Build domain identifier - simplified format matching reference implementation
+        # Format: jackett.{indexer_id}
+        domain = f"{self.DOMAIN_PREFIX}.{indexer_id}"
 
-        # Build complete indexer dictionary
-        # CRITICAL: Must have correct structure for site registration and search visibility
+        # Build simplified indexer dictionary (matching reference implementation)
+        # Only include essential fields needed for registration and search
         return {
-            # Basic identification
-            "id": f"{self.plugin_name}-{indexer_id}",
-            "name": f"{self.plugin_name}-{indexer_title}",
+            "id": f"{self.plugin_name}-{indexer_name}",
+            "name": f"{self.plugin_name}-{indexer_name}",
+            "url": f"{self._host.rstrip('/')}/api/v2.0/indexers/{indexer_id}/results/torznab/",
             "domain": domain,
-            "url": self._host,
-
-            # Custom fields for our plugin
-            "indexer_id": indexer_id,  # Store original Jackett ID
-            "indexer_title": indexer_title,
-
-            # Site properties - IMPORTANT for search visibility
-            "public": True,  # Mark as public so it shows in search
+            "public": True,
             "proxy": self._proxy,
-            "language": indexer.get("language", "en-US"),
-            "protocol": "torrent",
-
-            # Site status
-            "active": True,  # Mark as active
-            "is_active": True,  # Alternative active flag
-
-            # Limits
-            "limit_interval": 0,  # No rate limit (handled by Jackett)
-            "limit_count": 0,
-            "limit_seconds": 0,
-
-            # Disable rendering
-            "render": False,
-            "chrome": False,
-
-            # Cookie and headers
-            "cookie": "",
-            "ua": "",
-
-            # IMPORTANT: torrents structure is required for registration
-            # Use empty/false values to prevent spider usage
-            "torrents": {
-                "list": {
-                    "selector": ""  # Empty selector prevents HTML parsing
-                }
-            },
-            "parser": {
-                "enabled": False  # Disable parser
-            }
         }
 
     def get_state(self) -> bool:
@@ -387,17 +353,11 @@ class JackettIndexer(_PluginBase):
                 except Exception as e:
                     logger.error(f"【{self.plugin_name}】停止定时任务失败：{str(e)}")
 
-            # Unregister indexers
-            if self._indexers and self._sites_helper:
-                for indexer in self._indexers:
-                    domain = indexer.get("domain")
-                    if domain:
-                        try:
-                            self._sites_helper.delete_indexer(domain)
-                        except Exception as e:
-                            logger.debug(f"【{self.plugin_name}】删除索引器失败 {domain}：{str(e)}")
-
-                logger.info(f"【{self.plugin_name}】已注销 {len(self._indexers)} 个索引器")
+            # Note: We intentionally do NOT unregister indexers from site management
+            # This allows sites to persist between plugin restarts and MoviePilot reboots
+            # If you need to remove sites, disable them manually in the site management UI
+            if self._indexers:
+                logger.info(f"【{self.plugin_name}】服务已停止，{len(self._indexers)} 个索引器保留在站点管理中")
                 self._indexers = []
 
         except Exception as e:
@@ -462,16 +422,21 @@ class JackettIndexer(_PluginBase):
                 logger.debug(f"【{self.plugin_name}】站点 {site_name} 不属于本插件")
                 return []
 
-            # Extract indexer information
+            # Extract indexer ID from domain
+            # Domain format: jackett.{indexer_id}
             domain = site.get("domain")
             if not domain:
                 logger.error(f"【{self.plugin_name}】站点缺少 domain 字段：{site_name}")
                 return []
 
-            # Get indexer ID from site
-            indexer_id = site.get("indexer_id")
-            if not indexer_id:
-                logger.error(f"【{self.plugin_name}】站点缺少 indexer_id：{site_name}")
+            # Parse indexer ID from domain (format: jackett.indexer_id)
+            try:
+                indexer_id = domain.split(".")[-1]
+                if not indexer_id:
+                    logger.error(f"【{self.plugin_name}】无法从domain提取索引器ID：{domain}")
+                    return []
+            except Exception as e:
+                logger.error(f"【{self.plugin_name}】解析索引器ID失败：{str(e)}")
                 return []
 
             logger.info(f"【{self.plugin_name}】开始搜索：站点={site_name}, 关键词={keyword}, 类型={mtype}, 页码={page}")
