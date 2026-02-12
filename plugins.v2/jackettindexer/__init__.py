@@ -313,9 +313,9 @@ class JackettIndexer(_PluginBase):
         indexer_id = indexer.get("id", "")
         indexer_title = indexer.get("title", f"Indexer-{indexer_id}")
 
-        # Build domain identifier for MoviePilot compatibility
-        # Format: jackett.{indexer_id}.indexer
-        domain = f"{self.DOMAIN_PREFIX}.{indexer_id}.indexer"
+        # Build domain identifier with http:// prefix for MoviePilot compatibility
+        # Format: http://jackett.{indexer_id}.indexer
+        domain = f"http://{self.DOMAIN_PREFIX}.{indexer_id}.indexer"
 
         # Build indexer dictionary with necessary fields for MoviePilot compatibility
         return {
@@ -439,15 +439,16 @@ class JackettIndexer(_PluginBase):
             logger.info(f"【{self.plugin_name}】开始搜索：站点={site_name}, 关键词={keyword}, 类型={mtype}, 页码={page}")
 
             # Extract indexer ID from domain
-            # Domain format: jackett.{indexer_id}.indexer
+            # Domain format: http://jackett.{indexer_id}.indexer
             domain = site.get("domain", "")
             if not domain:
                 logger.warning(f"【{self.plugin_name}】站点缺少 domain 字段：{site_name}")
                 return results
 
-            # Parse indexer ID from domain (split by ., take second part)
-            # jackett.beyond-hd-api.indexer -> beyond-hd-api
-            domain_parts = domain.split(".")
+            # Parse indexer ID from domain (remove http://, split by ., take second part)
+            # http://jackett.beyond-hd-api.indexer -> beyond-hd-api
+            domain_clean = domain.replace("http://", "").replace("https://", "")
+            domain_parts = domain_clean.split(".")
             if len(domain_parts) < 3:
                 logger.warning(f"【{self.plugin_name}】无法从domain解析索引器ID：{domain}")
                 return results

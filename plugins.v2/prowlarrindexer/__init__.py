@@ -269,13 +269,16 @@ class ProwlarrIndexer(_PluginBase):
         indexer_id = indexer.get("id")
         indexer_name = indexer.get("name", f"Indexer{indexer_id}")
 
-        # Build domain identifier for MoviePilot compatibility
-        # Format: prowlarr.{indexer_id}.indexer
-        domain = f"{self.DOMAIN_PREFIX}.{indexer_id}.indexer"
+        # Sanitize indexer_name for domain (remove spaces and special chars, convert to lowercase)
+        indexer_name_slug = re.sub(r'[^a-z0-9]+', '-', indexer_name.lower()).strip('-')
+
+        # Build domain identifier with http:// prefix for MoviePilot compatibility
+        # Format: http://prowlarr.{indexer_name_slug}.indexer
+        domain = f"http://{self.DOMAIN_PREFIX}.{indexer_name_slug}.indexer"
 
         # Build indexer dictionary with necessary fields for MoviePilot compatibility
         return {
-            # Basic identification
+            # Basic identification - use indexer_name for better display
             "id": f"{self.plugin_name}-{indexer_name}",
             "name": f"{self.plugin_name}-{indexer_name}",
             "url": f"{self._host.rstrip('/')}/api/v1/indexer/{indexer_id}",
@@ -394,27 +397,15 @@ class ProwlarrIndexer(_PluginBase):
             # Log that method was called
             logger.info(f"【{self.plugin_name}】开始搜索：站点={site_name}, 关键词={keyword}, 类型={mtype}, 页码={page}")
 
-            # Extract indexer ID from domain
-            # Domain format: prowlarr.{indexer_id}.indexer
-            domain = site.get("domain", "")
-            if not domain:
-                logger.warning(f"【{self.plugin_name}】站点缺少 domain 字段：{site_name}")
+            # Extract indexer ID from site (stored in indexer dict)
+            # Domain format is now: http://prowlarr.{indexer_name}.indexer
+            # But we get indexer_id directly from site info
+            indexer_id = site.get("indexer_id")
+            if not indexer_id:
+                logger.warning(f"【{self.plugin_name}】站点缺少 indexer_id 字段：{site_name}")
                 return results
 
-            # Parse indexer ID from domain (split by ., take second part)
-            # prowlarr.123.indexer -> 123
-            domain_parts = domain.split(".")
-            if len(domain_parts) < 3:
-                logger.warning(f"【{self.plugin_name}】无法从domain解析索引器ID：{domain}")
-                return results
-
-            indexer_id_str = domain_parts[1]
-            if not indexer_id_str or not indexer_id_str.isdigit():
-                logger.warning(f"【{self.plugin_name}】从domain提取的索引器ID无效：{domain} -> {indexer_id_str}")
-                return results
-
-            indexer_id = int(indexer_id_str)
-            logger.debug(f"【{self.plugin_name}】从domain提取索引器ID：{indexer_id}")
+            logger.debug(f"【{self.plugin_name}】使用索引器ID：{indexer_id}")
 
             # Build search parameters
             search_params = self._build_search_params(
