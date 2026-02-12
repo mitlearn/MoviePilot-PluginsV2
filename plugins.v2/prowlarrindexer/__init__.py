@@ -4,6 +4,7 @@ MoviePilot 插件：ProwlarrIndexer
 通过 Prowlarr API 搜索资源，将结果以 TorrentInfo 列表返回给 MoviePilot。
 """
 import copy
+import re
 import time
 import traceback
 from datetime import datetime, timedelta
@@ -27,14 +28,15 @@ from app.utils.http import RequestUtils
 class ProwlarrIndexer(_PluginBase):
     """
     Prowlarr 索引器插件
-    通过 get_module() 劫持 search_torrents 方法，将 Prowlarr 搜索结果注入 MoviePilot 搜索链。
+    通过 get_module() 劫持 search_torrents / async_search_torrents 方法，
+    将 Prowlarr 搜索结果注入 MoviePilot 搜索链。
     """
 
     # ==================== 插件元数据 ====================
     plugin_name = "ProwlarrIndexer"
     plugin_desc = "聚合索引：通过 Prowlarr 检索站点资源"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "0.1"
+    plugin_version = "0.2"
     plugin_author = "prowlarr"
     author_url = "https://github.com/prowlarr"
     plugin_config_prefix = "prowlarr_indexer_"
@@ -58,11 +60,13 @@ class ProwlarrIndexer(_PluginBase):
         self._timeout: int = 30
         self._max_retries: int = 3
         self._indexers: list = []
+        self._indexer_map: dict = {}
         self._sites_helper: Optional[SitesHelper] = None
 
     def init_plugin(self, config: dict = None):
         self._sites_helper = SitesHelper()
         self._indexers = []
+        self._indexer_map = {}
 
         if config:
             self._enabled = config.get("enabled", False)
@@ -118,7 +122,24 @@ class ProwlarrIndexer(_PluginBase):
     # ==================== 模块劫持 ====================
 
     def get_module(self) -> Dict[str, Any]:
-        return {"search_torrents": self.search_torrents}
+        return {
+            "search_torrents": self.search_torrents,
+            "async_search_torrents": self.async_search_torrents,
+        }
+
+    async def async_search_torrents(
+        self,
+        site: dict,
+        keyword: str = None,
+        mtype: Optional[MediaType] = None,
+        cat: Optional[str] = None,
+        page: Optional[int] = 0,
+    ) -> List[TorrentInfo]:
+        """
+        异步搜索入口，MoviePilot 搜索链实际调用此方法。
+        内部委托同步 search_torrents 实现。
+        """
+        return self.search_torrents(site=site, keyword=keyword, mtype=mtype, cat=cat, page=page)
 
     # ==================== 搜索逻辑 ====================
 
@@ -235,6 +256,7 @@ class ProwlarrIndexer(_PluginBase):
             return
 
         self._indexers = []
+        self._indexer_map = {}
         for v in data:
             indexer_id = v.get("id")
             indexer_name = v.get("name")
@@ -246,10 +268,13 @@ class ProwlarrIndexer(_PluginBase):
             if not v.get("supportsSearch", True):
                 continue
 
+            safe_name = self._sanitize_name(indexer_name)
+            self._indexer_map[safe_name] = indexer_id
+
             self._indexers.append({
                 "id": f"{self.plugin_name}-{indexer_name}",
                 "name": f"{self.plugin_name}-{indexer_name}",
-                "domain": f"{self._domain_prefix}.{indexer_id}",
+                "domain": f"{self._domain_prefix}.{safe_name}",
                 "url": f"{self._host}/api/v1/indexer/{indexer_id}",
                 "public": v.get("privacy", "public") == "public",
                 "proxy": self._proxy,
@@ -332,13 +357,23 @@ class ProwlarrIndexer(_PluginBase):
             return [5000]
         return [2000, 5000]
 
+    @staticmethod
+    def _sanitize_name(name: str) -> str:
+        """将索引器名称转为安全的域名片段（小写字母、数字、下划线、连字符）"""
+        s = re.sub(r'[^a-zA-Z0-9_-]', '_', name.strip().lower())
+        s = re.sub(r'_+', '_', s).strip('_')
+        return s or "unknown"
+
     def _extract_indexer_id(self, site: dict) -> str:
-        """域名格式: prowlarr_indexer.<indexer_id>"""
+        """域名格式: prowlarr_indexer.<sanitized_name>，通过 _indexer_map 映射回真实 ID"""
         domain = site.get("domain", "")
         if not domain:
             return ""
-        parts = domain.split(".")
-        return parts[-1] if len(parts) >= 2 else ""
+        parts = domain.split(".", 1)
+        if len(parts) < 2:
+            return ""
+        key = parts[1]
+        return str(self._indexer_map.get(key, ""))
 
     @staticmethod
     def _extract_imdb(entry: dict) -> str:
