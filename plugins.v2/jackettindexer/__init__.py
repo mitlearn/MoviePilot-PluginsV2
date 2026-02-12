@@ -174,21 +174,39 @@ class JackettIndexer(_PluginBase):
 
                     logger.debug(f"【{self.plugin_name}】准备注册索引器：{name} (domain: {domain})")
 
-                    # Register with sites helper - try both methods for compatibility
+                    # Register with sites helper - try multiple methods
+                    registered = False
                     try:
-                        # Try add_site first (for search list visibility)
+                        # Method 1: Try add_site first (for search list visibility)
                         if hasattr(self._sites_helper, 'add_site'):
                             self._sites_helper.add_site(domain, indexer_dict)
                             logger.info(f"【{self.plugin_name}】✅ 成功注册站点(add_site)：{name}")
-                        else:
-                            # Fallback to add_indexer
+                            registered = True
+
+                        # Method 2: Also try add_indexer
+                        if hasattr(self._sites_helper, 'add_indexer'):
                             self._sites_helper.add_indexer(domain, indexer_dict)
-                            logger.info(f"【{self.plugin_name}】✅ 成功注册索引器(add_indexer)：{name}")
+                            if not registered:
+                                logger.info(f"【{self.plugin_name}】✅ 成功注册索引器(add_indexer)：{name}")
+                            registered = True
+
+                        # Method 3: Try to add to sites directly if it's a property
+                        if hasattr(self._sites_helper, 'sites') and isinstance(self._sites_helper.sites, dict):
+                            self._sites_helper.sites[domain] = indexer_dict
+                            if not registered:
+                                logger.info(f"【{self.plugin_name}】✅ 成功添加到站点字典：{name}")
+                            registered = True
+
+                        if not registered:
+                            logger.warning(f"【{self.plugin_name}】⚠️ 未找到合适的注册方法，站点可能不可见：{name}")
+                            logger.debug(f"【{self.plugin_name}】SitesHelper 可用方法：{dir(self._sites_helper)}")
+
                     except Exception as reg_error:
                         logger.error(f"【{self.plugin_name}】❌ 注册失败：{name}, 错误：{str(reg_error)}")
                         logger.debug(f"【{self.plugin_name}】站点数据：{indexer_dict}")
-                        raise
+                        # Don't raise, continue with other indexers
 
+                    # Always add to our internal list
                     self._indexers.append(indexer_dict)
 
                 except Exception as e:
@@ -1078,6 +1096,15 @@ class JackettIndexer(_PluginBase):
             }
         ]
 
+    def get_indexers(self) -> List[Dict[str, Any]]:
+        """
+        返回插件管理的索引器列表，供系统查询
+
+        Returns:
+            List of indexer dictionaries
+        """
+        return self._indexers if self._indexers else []
+
     def get_api(self) -> List[Dict[str, Any]]:
         """
         Get plugin API endpoints.
@@ -1085,4 +1112,13 @@ class JackettIndexer(_PluginBase):
         Returns:
             List of API endpoint definitions
         """
-        return []
+        # 提供 API 端点返回索引器列表
+        return [
+            {
+                "path": "/indexers",
+                "endpoint": self.get_indexers,
+                "methods": ["GET"],
+                "summary": "获取索引器列表",
+                "description": "返回所有已注册的 Jackett 索引器"
+            }
+        ]
