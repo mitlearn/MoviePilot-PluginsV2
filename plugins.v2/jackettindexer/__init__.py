@@ -458,6 +458,7 @@ class JackettIndexer(_PluginBase):
         # First line of the method - log immediately
         logger.info(f"【{self.plugin_name}】★★★ search_torrents 方法被调用 ★★★")
         logger.info(f"【{self.plugin_name}】site={site}, keyword={keyword}")
+        logger.info(f"【{self.plugin_name}】mtype={mtype}, page={page}")
 
         try:
             # Debug: Log method call with all parameters
@@ -480,29 +481,29 @@ class JackettIndexer(_PluginBase):
             if not self._is_english_keyword(keyword):
                 logger.info(f"【{self.plugin_name}】检测到非英文关键词，跳过搜索：{keyword}")
                 return results
-        except Exception as e:
-            logger.error(f"【{self.plugin_name}】参数验证异常：{str(e)}\n{traceback.format_exc()}")
-            return results
+            else:
+                logger.debug(f"【{self.plugin_name}】关键词检查通过：{keyword}")
 
-        try:
             # Get site name for logging
             site_name = site.get("name", "Unknown")
-            logger.debug(f"【{self.plugin_name}】站点名称：{site_name}, plugin_name: {self.plugin_name}")
+            logger.debug(f"【{self.plugin_name}】站点名称：{site_name}")
 
             # Check if this site belongs to our plugin (matching reference implementation)
             site_name_value = site.get("name", "")
             if not site_name_value:
-                logger.debug(f"【{self.plugin_name}】站点名称为空，返回空结果")
+                logger.warning(f"【{self.plugin_name}】站点名称为空，返回空结果")
                 return results
 
             site_prefix = site_name_value.split("-")[0] if "-" in site_name_value else site_name_value
-            logger.debug(f"【{self.plugin_name}】站点前缀：{site_prefix}, 是否匹配：{site_prefix == self.plugin_name}")
+            logger.debug(f"【{self.plugin_name}】站点前缀：'{site_prefix}', 插件名称：'{self.plugin_name}', 匹配：{site_prefix == self.plugin_name}")
 
             if site_prefix != self.plugin_name:
-                logger.debug(f"【{self.plugin_name}】站点不属于本插件，返回空结果")
+                logger.debug(f"【{self.plugin_name}】站点不属于本插件（站点：{site_prefix}，插件：{self.plugin_name}），跳过")
                 return results
+
+            logger.info(f"【{self.plugin_name}】站点匹配成功，准备搜索")
         except Exception as e:
-            logger.error(f"【{self.plugin_name}】站点名称处理异常：{str(e)}\n{traceback.format_exc()}")
+            logger.error(f"【{self.plugin_name}】站点验证异常：{str(e)}\n{traceback.format_exc()}")
             return results
 
         try:
@@ -550,6 +551,7 @@ class JackettIndexer(_PluginBase):
                 return results
 
             # Parse XML results to TorrentInfo
+            logger.debug(f"【{self.plugin_name}】开始解析XML内容，长度：{len(xml_content)}")
             results = self._parse_torznab_xml(xml_content, site_name)
 
             logger.info(f"【{self.plugin_name}】搜索完成：{site_name} 返回 {len(results)} 个结果")
@@ -638,30 +640,45 @@ class JackettIndexer(_PluginBase):
                 timeout=60
             )
 
+            # Check if response is None or False
+            if response is None:
+                logger.error(f"【{self.plugin_name}】搜索API请求失败：response 为 None")
+                return None
+
             if not response:
-                logger.error(f"【{self.plugin_name}】搜索API请求失败：无响应")
+                logger.error(f"【{self.plugin_name}】搜索API请求失败：response 为 {type(response)}")
                 return None
 
-            # Check if response has status_code attribute
-            if not hasattr(response, 'status_code'):
-                logger.error(f"【{self.plugin_name}】响应对象格式异常：缺少status_code属性")
+            # Check if response has required attributes
+            if not hasattr(response, 'status_code') or not hasattr(response, 'text'):
+                logger.error(f"【{self.plugin_name}】响应对象格式异常：response type={type(response)}, "
+                           f"has status_code={hasattr(response, 'status_code')}, "
+                           f"has text={hasattr(response, 'text')}")
                 return None
 
+            # Check HTTP status code
             if response.status_code != 200:
                 logger.error(f"【{self.plugin_name}】搜索API请求失败：HTTP {response.status_code}")
                 # Safely get response text
-                response_text = getattr(response, 'text', '')
-                if response_text:
-                    logger.debug(f"【{self.plugin_name}】响应内容：{response_text[:500]}")
+                try:
+                    response_text = response.text if hasattr(response, 'text') else ''
+                    if response_text:
+                        logger.debug(f"【{self.plugin_name}】响应内容：{response_text[:500]}")
+                except Exception as e:
+                    logger.debug(f"【{self.plugin_name}】无法读取响应文本：{str(e)}")
                 return None
 
-            # Safely get response text
-            xml_content = getattr(response, 'text', None)
-            if xml_content is None:
-                logger.error(f"【{self.plugin_name}】响应对象没有text属性")
+            # Get response text
+            try:
+                xml_content = response.text
+                if xml_content is None or xml_content == '':
+                    logger.warning(f"【{self.plugin_name}】响应内容为空")
+                    return None
+                logger.debug(f"【{self.plugin_name}】成功获取响应，长度：{len(xml_content)}")
+                return xml_content
+            except Exception as e:
+                logger.error(f"【{self.plugin_name}】读取响应text属性失败：{str(e)}")
                 return None
-
-            return xml_content
 
         except Exception as e:
             logger.error(f"【{self.plugin_name}】搜索API异常：{str(e)}\n{traceback.format_exc()}")
@@ -709,15 +726,21 @@ class JackettIndexer(_PluginBase):
                 return []
 
             items = channel[0].getElementsByTagName("item")
+            logger.debug(f"【{self.plugin_name}】找到 {len(items)} 个item元素")
 
-            for item in items:
+            for idx, item in enumerate(items):
                 try:
                     torrent_info = self._parse_torznab_item(item, site_name)
                     if torrent_info:
                         results.append(torrent_info)
+                        logger.debug(f"【{self.plugin_name}】成功解析item #{idx}: {torrent_info.title[:50]}")
+                    else:
+                        logger.debug(f"【{self.plugin_name}】item #{idx} 解析结果为 None")
                 except Exception as e:
-                    logger.debug(f"【{self.plugin_name}】解析item失败：{str(e)}")
+                    logger.warning(f"【{self.plugin_name}】解析item #{idx} 失败：{str(e)}")
                     continue
+
+            logger.debug(f"【{self.plugin_name}】XML解析完成，从 {len(items)} 个item中解析出 {len(results)} 个有效结果")
 
         except Exception as e:
             logger.error(f"【{self.plugin_name}】解析XML异常：{str(e)}\n{traceback.format_exc()}")
@@ -736,22 +759,39 @@ class JackettIndexer(_PluginBase):
             TorrentInfo object or None if parsing fails
         """
         try:
+            # Validate item is not None
+            if item is None:
+                logger.warning(f"【{self.plugin_name}】XML item 为 None，跳过")
+                return None
+
             # Extract basic fields
             title = DomUtils.tag_value(item, "title", default="")
             if not title:
+                logger.debug(f"【{self.plugin_name}】跳过无标题的item")
                 return None
 
             # Get download link
-            enclosure_node = item.getElementsByTagName("enclosure")
-            if enclosure_node:
-                enclosure = enclosure_node[0].getAttribute("url")
-            else:
-                enclosure = DomUtils.tag_value(item, "link", default="")
+            enclosure = ""
+            try:
+                enclosure_node = item.getElementsByTagName("enclosure")
+                if enclosure_node and len(enclosure_node) > 0:
+                    enclosure = enclosure_node[0].getAttribute("url")
+            except Exception as e:
+                logger.debug(f"【{self.plugin_name}】获取enclosure失败：{str(e)}")
+
+            if not enclosure:
+                try:
+                    enclosure = DomUtils.tag_value(item, "link", default="")
+                except Exception as e:
+                    logger.debug(f"【{self.plugin_name}】获取link失败：{str(e)}")
 
             # Try to get magnet link from torznab attributes
-            magnet_url = self._get_torznab_attr(item, "magneturl")
-            if magnet_url:
-                enclosure = magnet_url
+            try:
+                magnet_url = self._get_torznab_attr(item, "magneturl")
+                if magnet_url:
+                    enclosure = magnet_url
+            except Exception as e:
+                logger.debug(f"【{self.plugin_name}】获取magneturl失败：{str(e)}")
 
             if not enclosure:
                 logger.debug(f"【{self.plugin_name}】跳过无下载链接的结果：{title}")

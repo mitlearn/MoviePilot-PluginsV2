@@ -440,23 +440,27 @@ class ProwlarrIndexer(_PluginBase):
             if not self._is_english_keyword(keyword):
                 logger.info(f"【{self.plugin_name}】检测到非英文关键词，跳过搜索：{keyword}")
                 return results
+            else:
+                logger.debug(f"【{self.plugin_name}】关键词检查通过：{keyword}")
 
             # Get site name for logging
             site_name = site.get("name", "Unknown")
-            logger.debug(f"【{self.plugin_name}】站点名称：{site_name}, plugin_name: {self.plugin_name}")
+            logger.debug(f"【{self.plugin_name}】站点名称：{site_name}")
 
             # Check if this site belongs to our plugin (matching reference implementation)
             site_name_value = site.get("name", "")
             if not site_name_value:
-                logger.debug(f"【{self.plugin_name}】站点名称为空，返回空结果")
+                logger.warning(f"【{self.plugin_name}】站点名称为空，返回空结果")
                 return results
 
             site_prefix = site_name_value.split("-")[0] if "-" in site_name_value else site_name_value
-            logger.debug(f"【{self.plugin_name}】站点前缀：{site_prefix}, 是否匹配：{site_prefix == self.plugin_name}")
+            logger.debug(f"【{self.plugin_name}】站点前缀：'{site_prefix}', 插件名称：'{self.plugin_name}', 匹配：{site_prefix == self.plugin_name}")
 
             if site_prefix != self.plugin_name:
-                logger.debug(f"【{self.plugin_name}】站点不属于本插件，返回空结果")
+                logger.debug(f"【{self.plugin_name}】站点不属于本插件（站点：{site_prefix}，插件：{self.plugin_name}），跳过")
                 return results
+
+            logger.info(f"【{self.plugin_name}】站点匹配成功，准备搜索")
         except Exception as e:
             logger.error(f"【{self.plugin_name}】参数验证异常：{str(e)}\n{traceback.format_exc()}")
             return results
@@ -504,16 +508,24 @@ class ProwlarrIndexer(_PluginBase):
                 return results
 
             # Parse results to TorrentInfo
-            for item in api_results:
+            logger.debug(f"【{self.plugin_name}】开始解析 {len(api_results)} 条API结果")
+            for idx, item in enumerate(api_results):
                 try:
+                    if item is None:
+                        logger.warning(f"【{self.plugin_name}】跳过空项目 #{idx}")
+                        continue
+
                     torrent_info = self._parse_torrent_info(item, site_name)
                     if torrent_info:
                         results.append(torrent_info)
+                        logger.debug(f"【{self.plugin_name}】成功解析项目 #{idx}: {torrent_info.title[:50]}")
+                    else:
+                        logger.debug(f"【{self.plugin_name}】项目 #{idx} 解析结果为 None")
                 except Exception as e:
-                    logger.error(f"【{self.plugin_name}】解析种子信息失败：{str(e)}")
+                    logger.error(f"【{self.plugin_name}】解析种子信息失败 #{idx}：{str(e)}\n{traceback.format_exc()}")
                     continue
 
-            logger.info(f"【{self.plugin_name}】搜索完成：{site_name} 返回 {len(results)} 个结果")
+            logger.info(f"【{self.plugin_name}】搜索完成：{site_name} 从 {len(api_results)} 条原始结果中解析出 {len(results)} 个有效结果")
 
         except Exception as e:
             logger.error(f"【{self.plugin_name}】搜索异常：{str(e)}\n{traceback.format_exc()}")
@@ -606,33 +618,59 @@ class ProwlarrIndexer(_PluginBase):
                 proxies=self._proxy
             ).get_res(url, timeout=60)
 
+            # Check if response is None or False
+            if response is None:
+                logger.error(f"【{self.plugin_name}】搜索API请求失败：response 为 None")
+                return []
+
             if not response:
-                logger.error(f"【{self.plugin_name}】搜索API请求失败：无响应")
+                logger.error(f"【{self.plugin_name}】搜索API请求失败：response 为 {type(response)}")
                 return []
 
-            # Check if response has status_code attribute
+            # Check if response has required attributes
             if not hasattr(response, 'status_code'):
-                logger.error(f"【{self.plugin_name}】响应对象格式异常：缺少status_code属性")
+                logger.error(f"【{self.plugin_name}】响应对象格式异常：response type={type(response)}, "
+                           f"has status_code={hasattr(response, 'status_code')}")
                 return []
 
+            # Check HTTP status code
             if response.status_code != 200:
                 logger.error(f"【{self.plugin_name}】搜索API请求失败：HTTP {response.status_code}")
                 # Safely get response text
-                response_text = getattr(response, 'text', '')
-                if response_text:
-                    logger.debug(f"【{self.plugin_name}】响应内容：{response_text}")
+                try:
+                    response_text = response.text if hasattr(response, 'text') else ''
+                    if response_text:
+                        logger.debug(f"【{self.plugin_name}】响应内容：{response_text}")
+                except Exception as e:
+                    logger.debug(f"【{self.plugin_name}】无法读取响应文本：{str(e)}")
                 return []
 
+            # Parse JSON response
             try:
+                if not hasattr(response, 'json'):
+                    logger.error(f"【{self.plugin_name}】响应对象没有json方法")
+                    return []
+
                 data = response.json()
+                if data is None:
+                    logger.warning(f"【{self.plugin_name}】JSON解析结果为 None")
+                    return []
+
+                logger.debug(f"【{self.plugin_name}】成功解析JSON，类型：{type(data)}")
             except Exception as e:
                 logger.error(f"【{self.plugin_name}】解析搜索结果JSON失败：{str(e)}")
+                try:
+                    response_text = response.text if hasattr(response, 'text') else ''
+                    logger.debug(f"【{self.plugin_name}】原始响应：{response_text[:500]}")
+                except:
+                    pass
                 return []
 
             if not isinstance(data, list):
                 logger.error(f"【{self.plugin_name}】API返回格式错误：期望列表，得到 {type(data)}")
                 return []
 
+            logger.debug(f"【{self.plugin_name}】成功获取 {len(data)} 条搜索结果")
             return data
 
         except Exception as e:
@@ -651,19 +689,26 @@ class ProwlarrIndexer(_PluginBase):
             TorrentInfo object or None if parsing fails
         """
         try:
+            # Validate item is not None
+            if item is None:
+                logger.warning(f"【{self.plugin_name}】item 为 None，跳过")
+                return None
+
             # Validate item is a dictionary
             if not isinstance(item, dict):
                 logger.error(f"【{self.plugin_name}】种子信息格式错误：期望字典，得到 {type(item)}")
                 return None
 
-            # Extract required fields
-            title = item.get("title", "")
+            # Extract required fields with safe get
+            title = item.get("title", "") if item else ""
             if not title:
                 logger.debug(f"【{self.plugin_name}】跳过无标题的结果")
                 return None
 
             # Get download URL (prefer direct download over magnet)
-            enclosure = item.get("downloadUrl") or item.get("magnetUrl", "")
+            download_url = item.get("downloadUrl", "") if item else ""
+            magnet_url = item.get("magnetUrl", "") if item else ""
+            enclosure = download_url or magnet_url
             if not enclosure:
                 logger.debug(f"【{self.plugin_name}】跳过无下载链接的结果：{title}")
                 return None
