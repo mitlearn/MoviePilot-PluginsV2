@@ -43,7 +43,7 @@ class JackettIndexer(_PluginBase):
     plugin_name = "Jackett索引器"
     plugin_desc = "集成Jackett索引器搜索，支持Torznab协议多站点搜索。"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "0.6.0"
+    plugin_version = "0.7.0"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "jackettindexer_"
@@ -519,12 +519,9 @@ class JackettIndexer(_PluginBase):
 
             # Extract indexer ID from domain (matching reference implementation)
             # domain 格式: "jackett_indexer.{indexer_id}"
-            domain_url = StringUtils.get_url_domain(domain)
-            if not domain_url:
-                logger.warning(f"【{self.plugin_name}】无法解析domain：{domain}")
-                return results
-
-            indexer_id = domain_url.split(".")[-1]  # Take last part
+            # 直接从domain字符串解析，不使用StringUtils.get_url_domain()
+            # 因为它是为真实URL设计的，不适用于我们的伪域名格式
+            indexer_id = domain.split(".")[-1]  # Take last part after final dot
             if not indexer_id:
                 logger.warning(f"【{self.plugin_name}】从domain提取的索引器ID为空：{domain}")
                 return results
@@ -1055,9 +1052,7 @@ class JackettIndexer(_PluginBase):
                                             'label': 'API密钥',
                                             'placeholder': '',
                                             'hint': '在Jackett界面点击扳手图标获取API密钥',
-                                            'persistent-hint': True,
-                                            'type': 'password',
-                                            'append-inner-icon': 'mdi-eye-off'
+                                            'persistent-hint': True
                                         }
                                     }
                                 ]

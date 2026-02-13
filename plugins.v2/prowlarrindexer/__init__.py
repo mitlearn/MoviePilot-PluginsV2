@@ -42,7 +42,7 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "Prowlarr索引器"
     plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "0.6.0"
+    plugin_version = "0.7.0"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "prowlarrindexer_"
@@ -478,12 +478,9 @@ class ProwlarrIndexer(_PluginBase):
 
             # Extract indexer ID from domain (matching reference implementation)
             # domain 格式: "prowlarr_indexer.{indexer_id}"
-            domain_url = StringUtils.get_url_domain(domain)
-            if not domain_url:
-                logger.warning(f"【{self.plugin_name}】无法解析domain：{domain}")
-                return results
-
-            indexer_id_str = domain_url.split(".")[-1]  # Take last part
+            # 直接从domain字符串解析，不使用StringUtils.get_url_domain()
+            # 因为它是为真实URL设计的，不适用于我们的伪域名格式
+            indexer_id_str = domain.split(".")[-1]  # Take last part after final dot
             if not indexer_id_str or not indexer_id_str.isdigit():
                 logger.warning(f"【{self.plugin_name}】从domain提取的索引器ID无效：{domain} -> {indexer_id_str}")
                 return results
@@ -948,9 +945,7 @@ class ProwlarrIndexer(_PluginBase):
                                             'label': 'API密钥',
                                             'placeholder': '',
                                             'hint': '在Prowlarr设置→通用→安全→API密钥中获取',
-                                            'persistent-hint': True,
-                                            'type': 'password',
-                                            'append-inner-icon': 'mdi-eye-off'
+                                            'persistent-hint': True
                                         }
                                     }
                                 ]
