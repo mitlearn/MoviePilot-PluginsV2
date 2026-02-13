@@ -3,7 +3,7 @@
     "name": "Prowlarr索引器",
     "description": "集成Prowlarr索引器搜索，支持多站点统一搜索",
     "labels": "indexer,prowlarr,torrent,search",
-    "version": "0.7.1",
+    "version": "0.7.2",
     "icon": "Prowlarr.png",
     "author": "Claude",
     "level": 1,
@@ -21,13 +21,14 @@
       "v0.6.0": "智能关键词过滤：自动检测并跳过非英文搜索关键词(如中文、日文、韩文)，避免无效搜索；正确识别站点类型：根据Prowlarr API的privacy字段准确判断公开/私有站点，而非硬编码",
       "v0.7.0": "关键修复：移除错误的StringUtils.get_url_domain()调用，改用直接字符串分割提取索引器ID，修复Prowlarr搜索请求未发送到服务器的问题；简化API密钥字段配置，移除不可用的密码遮罩功能，改为明文显示便于配置和验证",
       "v0.7.1": "增强调试：添加详细的domain生成和索引器ID提取日志，包括类型信息和中间步骤，便于诊断搜索问题；明确指定API密钥字段类型为text"
+      "v0.7.2": "关键修复：处理MoviePilot将domain转换为URL格式的问题（http://prowlarr_indexer.2/），在提取索引器ID前先剥离协议前缀和尾部斜杠，确保搜索请求正确发送到Prowlarr服务器",
     }
   },
   "JackettIndexer": {
     "name": "Jackett索引器",
     "description": "集成Jackett索引器搜索，支持Torznab协议多站点搜索",
     "labels": "indexer,jackett,torrent,search,torznab",
-    "version": "0.7.1",
+    "version": "0.7.2",
     "icon": "Jackett_A.png",
     "author": "Claude",
     "level": 1,
@@ -43,6 +44,7 @@
       "v0.5.0": "版本同步：与Prowlarr插件保持一致的版本号和架构",
       "v0.6.0": "智能关键词过滤：自动检测并跳过非英文搜索关键词(如中文、日文、韩文)，避免无效搜索；正确识别站点类型：根据Jackett索引器type字段准确判断公开/私有站点(public/semi-public/private)",
       "v0.7.0": "预防性修复：与Prowlarr插件保持一致，移除错误的StringUtils.get_url_domain()调用，改用直接字符串分割提取索引器ID；简化API密钥字段配置，移除不可用的密码遮罩功能",
+      "v0.7.2": "关键修复：处理MoviePilot将domain转换为URL格式的问题（http://jackett_indexer.xxx/），在提取索引器ID前先剥离协议前缀和尾部斜杠，确保搜索请求正确发送到Jackett服务器",
       "v0.7.1": "增强调试：添加详细的domain生成和索引器ID提取日志，包括类型信息和中间步骤，便于诊断搜索问题；明确指定API密钥字段类型为text"
     }
   }

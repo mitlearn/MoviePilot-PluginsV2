@@ -42,7 +42,7 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "Prowlarr索引器"
     plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "0.7.1"
+    plugin_version = "0.7.2"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "prowlarrindexer_"
@@ -478,12 +478,17 @@ class ProwlarrIndexer(_PluginBase):
                 return results
 
             # Extract indexer ID from domain (matching reference implementation)
-            # domain 格式: "prowlarr_indexer.{indexer_id}"
-            # 直接从domain字符串解析，不使用StringUtils.get_url_domain()
-            # 因为它是为真实URL设计的，不适用于我们的伪域名格式
+            # domain 原始格式: "prowlarr_indexer.{indexer_id}"
+            # 但MoviePilot存储时会转换为URL格式: "http://prowlarr_indexer.{indexer_id}/"
+            # 需要先剥离URL格式，再提取ID
             logger.debug(f"【{self.plugin_name}】准备从domain提取indexer_id，domain={domain}")
 
-            indexer_id_str = domain.split(".")[-1]  # Take last part after final dot
+            # 剥离URL格式：移除协议前缀和尾部斜杠
+            domain_clean = domain.replace("http://", "").replace("https://", "").rstrip("/")
+            logger.debug(f"【{self.plugin_name}】清理后的domain：{domain_clean}")
+
+            # 从清理后的domain提取ID（最后一个点后面的部分）
+            indexer_id_str = domain_clean.split(".")[-1]
             logger.debug(f"【{self.plugin_name}】提取结果：indexer_id_str={indexer_id_str}")
 
             if not indexer_id_str or not indexer_id_str.isdigit():
