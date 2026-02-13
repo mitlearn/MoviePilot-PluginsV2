@@ -43,7 +43,7 @@ class JackettIndexer(_PluginBase):
     plugin_name = "Jackett索引器"
     plugin_desc = "集成Jackett索引器搜索，支持Torznab协议多站点搜索。"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "0.7.0"
+    plugin_version = "0.7.1"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "jackettindexer_"
@@ -338,8 +338,9 @@ class JackettIndexer(_PluginBase):
         # Jackett types: "public", "semi-public", "private"
         is_public = indexer_type.lower() in ["public", "semi-public"]
 
-        # Log type detection
+        # Log type detection and domain generation
         logger.debug(f"【{self.plugin_name}】索引器 {indexer_title} 类型：{indexer_type} -> {'公开' if is_public else '私有'}")
+        logger.debug(f"【{self.plugin_name}】生成domain：{domain}，indexer_id={indexer_id} (类型：{type(indexer_id)})")
 
         # Build indexer dictionary (matching JackettExtend reference implementation exactly)
         return {
@@ -521,12 +522,16 @@ class JackettIndexer(_PluginBase):
             # domain 格式: "jackett_indexer.{indexer_id}"
             # 直接从domain字符串解析，不使用StringUtils.get_url_domain()
             # 因为它是为真实URL设计的，不适用于我们的伪域名格式
+            logger.debug(f"【{self.plugin_name}】准备从domain提取indexer_id，domain={domain}")
+
             indexer_id = domain.split(".")[-1]  # Take last part after final dot
+            logger.debug(f"【{self.plugin_name}】提取结果：indexer_id={indexer_id}")
+
             if not indexer_id:
                 logger.warning(f"【{self.plugin_name}】从domain提取的索引器ID为空：{domain}")
                 return results
 
-            logger.info(f"【{self.plugin_name}】从domain提取索引器ID：{indexer_id}，准备构建搜索URL")
+            logger.info(f"【{self.plugin_name}】✓ 从domain提取索引器ID成功：{indexer_id}，准备构建搜索URL")
 
             # Build search parameters
             search_params = self._build_search_params(
@@ -1052,7 +1057,8 @@ class JackettIndexer(_PluginBase):
                                             'label': 'API密钥',
                                             'placeholder': '',
                                             'hint': '在Jackett界面点击扳手图标获取API密钥',
-                                            'persistent-hint': True
+                                            'persistent-hint': True,
+                                            'type': 'text'
                                         }
                                     }
                                 ]

@@ -42,7 +42,7 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "Prowlarr索引器"
     plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "0.7.0"
+    plugin_version = "0.7.1"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "prowlarrindexer_"
@@ -297,9 +297,10 @@ class ProwlarrIndexer(_PluginBase):
         privacy = indexer.get("privacy", 1)
         is_public = privacy == 0
 
-        # Log privacy detection
+        # Log privacy detection and domain generation
         privacy_str = {0: "公开", 1: "私有", 2: "半私有"}.get(privacy, "未知")
         logger.debug(f"【{self.plugin_name}】索引器 {indexer_name} 隐私级别：{privacy_str} (privacy={privacy})")
+        logger.debug(f"【{self.plugin_name}】生成domain：{domain}，indexer_id={indexer_id} (类型：{type(indexer_id)})")
 
         # Build indexer dictionary (matching ProwlarrExtend reference implementation)
         return {
@@ -480,13 +481,17 @@ class ProwlarrIndexer(_PluginBase):
             # domain 格式: "prowlarr_indexer.{indexer_id}"
             # 直接从domain字符串解析，不使用StringUtils.get_url_domain()
             # 因为它是为真实URL设计的，不适用于我们的伪域名格式
+            logger.debug(f"【{self.plugin_name}】准备从domain提取indexer_id，domain={domain}")
+
             indexer_id_str = domain.split(".")[-1]  # Take last part after final dot
+            logger.debug(f"【{self.plugin_name}】提取结果：indexer_id_str={indexer_id_str}")
+
             if not indexer_id_str or not indexer_id_str.isdigit():
-                logger.warning(f"【{self.plugin_name}】从domain提取的索引器ID无效：{domain} -> {indexer_id_str}")
+                logger.warning(f"【{self.plugin_name}】从domain提取的索引器ID无效：{domain} -> '{indexer_id_str}'")
                 return results
 
             indexer_id = int(indexer_id_str)
-            logger.info(f"【{self.plugin_name}】从domain提取索引器ID：{indexer_id}，准备构建搜索URL")
+            logger.info(f"【{self.plugin_name}】✓ 从domain提取索引器ID成功：{indexer_id}，准备构建搜索URL")
 
             # Build search parameters
             search_params = self._build_search_params(
@@ -945,7 +950,8 @@ class ProwlarrIndexer(_PluginBase):
                                             'label': 'API密钥',
                                             'placeholder': '',
                                             'hint': '在Prowlarr设置→通用→安全→API密钥中获取',
-                                            'persistent-hint': True
+                                            'persistent-hint': True,
+                                            'type': 'text'
                                         }
                                     }
                                 ]
