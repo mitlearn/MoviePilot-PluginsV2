@@ -9,7 +9,6 @@ Version: 0.1.0
 Author: Claude
 """
 
-import copy
 import re
 import traceback
 from typing import List, Dict, Optional, Any, Tuple
@@ -42,12 +41,12 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "Prowlarr索引器"
     plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。仅索引私有站点。"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "0.9.0"
+    plugin_version = "1.0.0"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "prowlarrindexer_"
     plugin_order = 15
-    auth_level = 1
+    auth_level = 2
 
     # Private attributes
     _enabled: bool = False
@@ -132,31 +131,14 @@ class ProwlarrIndexer(_PluginBase):
             logger.info(f"【{self.plugin_name}】开始获取索引器...")
             self._fetch_and_build_indexers()
 
-        # IMPORTANT: Clean up old indexers first (one-time cleanup for v0.3.0)
-        # This ensures old站点 with incorrect structure are removed
+        # Register indexers to site management (following official CustomIndexer pattern)
+        # add_indexer will overwrite existing indexers with same domain
         for indexer in self._indexers:
             domain = indexer.get("domain", "")
-            try:
-                if self._sites_helper.get_indexer(domain):
-                    self._sites_helper.delete_indexer(domain)
-                    logger.info(f"【{self.plugin_name}】清理旧站点：{indexer.get('name')} (domain: {domain})")
-            except Exception as e:
-                logger.debug(f"【{self.plugin_name}】清理站点失败（可能不存在）：{str(e)}")
+            self._sites_helper.add_indexer(domain, indexer)
+            logger.debug(f"【{self.plugin_name}】注册到站点管理：{indexer.get('name')} (domain: {domain})")
 
-        # Register indexers to site management (matching reference implementation)
-        registered_count = 0
-        for indexer in self._indexers:
-            domain = indexer.get("domain", "")
-            site_info = self._sites_helper.get_indexer(domain)
-            if not site_info:
-                new_indexer = copy.deepcopy(indexer)
-                self._sites_helper.add_indexer(domain, new_indexer)
-                logger.info(f"【{self.plugin_name}】新增到站点管理：{indexer.get('name')} (domain: {domain})")
-                registered_count += 1
-            else:
-                logger.debug(f"【{self.plugin_name}】站点已存在，跳过：{indexer.get('name')} (domain: {domain})")
-
-        logger.info(f"【{self.plugin_name}】插件初始化完成，总计 {len(self._indexers)} 个索引器，新增 {registered_count} 个")
+        logger.info(f"【{self.plugin_name}】插件初始化完成，共注册 {len(self._indexers)} 个索引器")
 
     def _fetch_and_build_indexers(self) -> bool:
         """

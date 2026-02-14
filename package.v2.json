@@ -3,10 +3,10 @@
     "name": "Prowlarr索引器",
     "description": "集成Prowlarr索引器搜索，支持API多站点统一搜索。仅索引私有站点。",
     "labels": "indexer,prowlarr,torrent,search,private",
-    "version": "0.9.0",
+    "version": "1.0.0",
     "icon": "Prowlarr.png",
     "author": "Claude",
-    "level": 1,
+    "level": 2,
     "history": {
       "v0.1.0": "初始版本发布，支持Prowlarr API搜索、自动同步索引器、分类过滤、定时同步",
       "v0.1.1": "修复爬虫冲突问题：添加render/chrome/rss/search/browse字段禁用爬虫；优化域名格式使用数字ID；增强日志记录；改进查看数据页展示站点ID、索引器ID、域名等完整信息",
@@ -23,17 +23,18 @@
       "v0.7.1": "增强调试：添加详细的domain生成和索引器ID提取日志，包括类型信息和中间步骤，便于诊断搜索问题；明确指定API密钥字段类型为text"
       "v0.7.2": "关键修复：处理MoviePilot将domain转换为URL格式的问题（http://prowlarr_indexer.2/），在提取索引器ID前先剥离协议前缀和尾部斜杠，确保搜索请求正确发送到Prowlarr服务器",
       "v0.8.0": "优化日志：移除不必要的符号（★✓✅等），调整日志等级（减少INFO噪音，详细信息移至DEBUG）；修改API密钥字段为password类型（固定遮罩显示）",
-      "v0.9.0": "站点认证与过滤：需求一：严格站点认证，仅使用已在Prowlarr中启用(enable=true)的索引器；需求二：私有站点过滤，自动过滤公开站点(privacy=0)和半私有站点(privacy=2)，仅索引私有站点(privacy=1)，确保高质量资源"
+      "v0.9.0": "站点认证与过滤：需求一：严格站点认证，仅使用已在Prowlarr中启用(enable=true)的索引器；需求二：私有站点过滤，自动过滤公开站点(privacy=0)和半私有站点(privacy=2)，仅索引私有站点(privacy=1)，确保高质量资源",
+      "v1.0.0": "符合官方规范的正式版本：auth_level改为2（允许所有认证用户使用）；简化索引器注册逻辑，直接使用add_indexer遵循官方CustomIndexer模式；移除不必要的get_indexer检查和copy.deepcopy；移除init清理旧站点逻辑；说明MoviePilot用户认证由系统层面处理，插件无需检查"
     }
   },
   "JackettIndexer": {
     "name": "Jackett索引器",
     "description": "集成Jackett索引器搜索，支持Torznab协议多站点搜索。仅索引私有站点。",
     "labels": "indexer,jackett,torrent,search,torznab,private",
-    "version": "0.9.0",
+    "version": "1.0.0",
     "icon": "Jackett_A.png",
     "author": "Claude",
-    "level": 1,
+    "level": 2,
     "history": {
       "v0.1.0": "初始版本发布，支持Jackett Torznab API搜索、自动同步索引器、XML解析、定时同步",
       "v0.1.1": "修复爬虫冲突问题：添加render/chrome/rss/search/browse字段禁用爬虫；优化域名格式使用数字ID；增强日志记录；改进查看数据页展示站点ID、索引器ID、域名等完整信息",
@@ -49,7 +50,8 @@
       "v0.7.1": "增强调试：添加详细的domain生成和索引器ID提取日志，包括类型信息和中间步骤，便于诊断搜索问题；明确指定API密钥字段类型为text",
       "v0.7.2": "关键修复：处理MoviePilot将domain转换为URL格式的问题（http://jackett_indexer.xxx/），在提取索引器ID前先剥离协议前缀和尾部斜杠，确保搜索请求正确发送到Jackett服务器",
       "v0.8.0": "优化日志：移除不必要的符号（★✓✅等），调整日志等级（减少INFO噪音，详细信息移至DEBUG）；修改API密钥字段为password类型（固定遮罩显示）",
-      "v0.9.0": "站点认证与过滤：需求一：严格站点认证，仅使用已在Jackett中配置(configured=true)的索引器；需求二：私有站点过滤，自动过滤公开站点(type=public)和半私有站点(type=semi-public)，仅索引私有站点(type=private)，确保高质量资源"
+      "v0.9.0": "站点认证与过滤：需求一：严格站点认证，仅使用已在Jackett中配置(configured=true)的索引器；需求二：私有站点过滤，自动过滤公开站点(type=public)和半私有站点(type=semi-public)，仅索引私有站点(type=private)，确保高质量资源",
+      "v1.0.0": "符合官方规范的正式版本：auth_level改为2（允许所有认证用户使用）；简化索引器注册逻辑，直接使用add_indexer遵循官方CustomIndexer模式；移除不必要的get_indexer检查和copy.deepcopy；移除init清理旧站点逻辑；说明MoviePilot用户认证由系统层面处理，插件无需检查"
     }
   }
 }
