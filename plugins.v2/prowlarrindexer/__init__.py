@@ -40,9 +40,9 @@ class ProwlarrIndexer(_PluginBase):
 
     # Plugin metadata
     plugin_name = "Prowlarr索引器"
-    plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。"
+    plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。仅索引私有站点。"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "0.7.2"
+    plugin_version = "0.9.0"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "prowlarrindexer_"
@@ -72,7 +72,7 @@ class ProwlarrIndexer(_PluginBase):
         Args:
             config: Configuration dictionary from user settings
         """
-        logger.info(f"【{self.plugin_name}】★★★ 开始初始化插件 ★★★")
+        logger.info(f"【{self.plugin_name}】开始初始化插件")
         logger.debug(f"【{self.plugin_name}】收到配置：{config}")
 
         # Stop existing services
@@ -151,7 +151,7 @@ class ProwlarrIndexer(_PluginBase):
             if not site_info:
                 new_indexer = copy.deepcopy(indexer)
                 self._sites_helper.add_indexer(domain, new_indexer)
-                logger.info(f"【{self.plugin_name}】✅ 新增到站点管理：{indexer.get('name')} (domain: {domain})")
+                logger.info(f"【{self.plugin_name}】新增到站点管理：{indexer.get('name')} (domain: {domain})")
                 registered_count += 1
             else:
                 logger.debug(f"【{self.plugin_name}】站点已存在，跳过：{indexer.get('name')} (domain: {domain})")
@@ -173,15 +173,24 @@ class ProwlarrIndexer(_PluginBase):
 
             # Build indexer dicts
             self._indexers = []
+            filtered_count = 0
             for indexer_data in indexers:
                 try:
                     indexer_dict = self._build_indexer_dict(indexer_data)
+
+                    # 需求二：过滤掉公开站点，只保留私有站点
+                    if indexer_dict.get("public", False):
+                        indexer_name = indexer_dict.get("name", "Unknown")
+                        logger.info(f"【{self.plugin_name}】过滤公开站点：{indexer_name}")
+                        filtered_count += 1
+                        continue
+
                     self._indexers.append(indexer_dict)
                 except Exception as e:
                     logger.error(f"【{self.plugin_name}】构建索引器失败：{str(e)}")
                     continue
 
-            logger.info(f"【{self.plugin_name}】成功获取 {len(self._indexers)} 个索引器")
+            logger.info(f"【{self.plugin_name}】成功获取 {len(self._indexers)} 个私有索引器，过滤掉 {filtered_count} 个公开站点")
             return True
 
         except Exception as e:
@@ -208,7 +217,7 @@ class ProwlarrIndexer(_PluginBase):
                 if not site_info:
                     new_indexer = copy.deepcopy(indexer)
                     self._sites_helper.add_indexer(domain, new_indexer)
-                    logger.info(f"【{self.plugin_name}】✅ 成功添加到站点管理：{indexer.get('name')} (domain: {domain})")
+                    logger.info(f"【{self.plugin_name}】成功添加到站点管理：{indexer.get('name')} (domain: {domain})")
                     registered_count += 1
 
             self._last_update = datetime.now()
@@ -222,6 +231,8 @@ class ProwlarrIndexer(_PluginBase):
     def _get_indexers_from_prowlarr(self) -> List[Dict[str, Any]]:
         """
         Fetch indexer list from Prowlarr API.
+
+        需求一：只获取已启用且已认证的索引器
 
         Returns:
             List of indexer dictionaries from Prowlarr API
@@ -261,13 +272,15 @@ class ProwlarrIndexer(_PluginBase):
                 logger.error(f"【{self.plugin_name}】API返回格式错误：期望列表，得到 {type(indexers)}")
                 return []
 
-            # Filter enabled indexers only
+            # 需求一：只获取已启用的索引器（表示已在Prowlarr中认证配置）
             enabled_indexers = [idx for idx in indexers if idx.get("enable", False)]
-            logger.info(f"【{self.plugin_name}】获取到 {len(enabled_indexers)} 个启用的索引器（总计 {len(indexers)} 个）")
+            logger.info(f"【{self.plugin_name}】获取到 {len(enabled_indexers)} 个已启用的索引器（总计 {len(indexers)} 个）")
 
             # Debug log first few indexers
             for idx in enabled_indexers[:3]:
-                logger.debug(f"【{self.plugin_name}】索引器示例：id={idx.get('id')}, name={idx.get('name')}")
+                privacy = idx.get("privacy", 1)
+                privacy_str = {0: "公开", 1: "私有", 2: "半私有"}.get(privacy, "未知")
+                logger.debug(f"【{self.plugin_name}】索引器示例：id={idx.get('id')}, name={idx.get('name')}, 类型={privacy_str}")
 
             return enabled_indexers
 
@@ -378,12 +391,7 @@ class ProwlarrIndexer(_PluginBase):
         Async wrapper for search_torrents.
         This is the actual method called by MoviePilot's async search system.
         """
-        # CRITICAL: Log IMMEDIATELY at method entry
-        import sys
-        sys.stderr.write(f"=== PROWLARR async_search_torrents CALLED ===\n")
-        sys.stderr.flush()
-
-        logger.info(f"【{self.plugin_name}】★★★ async_search_torrents 方法被调用 ★★★")
+        logger.debug(f"【{self.plugin_name}】async_search_torrents 被调用")
 
         # Delegate to synchronous implementation
         return self.search_torrents(site, keyword, mtype, page)
@@ -409,16 +417,8 @@ class ProwlarrIndexer(_PluginBase):
         Returns:
             List of TorrentInfo objects
         """
-        # CRITICAL: Log IMMEDIATELY at method entry - before ANY code
-        import sys
-        sys.stderr.write(f"=== PROWLARR search_torrents CALLED ===\n")
-        sys.stderr.flush()
-
         results = []
-
-        # First line of the method - log immediately
-        logger.info(f"【{self.plugin_name}】★★★ search_torrents 方法被调用 ★★★")
-        logger.info(f"【{self.plugin_name}】site={site}, keyword={keyword}")
+        logger.debug(f"【{self.plugin_name}】search_torrents 被调用: keyword={keyword}")
 
         try:
             # Debug: Log method call with all parameters
@@ -461,14 +461,14 @@ class ProwlarrIndexer(_PluginBase):
                 logger.debug(f"【{self.plugin_name}】站点不属于本插件（站点：{site_prefix}，插件：{self.plugin_name}），跳过")
                 return results
 
-            logger.info(f"【{self.plugin_name}】站点匹配成功，准备搜索")
+            logger.debug(f"【{self.plugin_name}】站点匹配成功，准备搜索")
         except Exception as e:
             logger.error(f"【{self.plugin_name}】参数验证异常：{str(e)}\n{traceback.format_exc()}")
             return results
 
         try:
             # Log that method was called
-            logger.info(f"【{self.plugin_name}】开始搜索：站点={site_name}, 关键词={keyword}, 类型={mtype}, 页码={page}")
+            logger.info(f"【{self.plugin_name}】搜索：站点={site_name}, 关键词={keyword}")
 
             # Extract indexer ID from domain (matching reference implementation)
             # Domain format: prowlarr_indexer.{indexer_id}
@@ -496,7 +496,7 @@ class ProwlarrIndexer(_PluginBase):
                 return results
 
             indexer_id = int(indexer_id_str)
-            logger.info(f"【{self.plugin_name}】✓ 从domain提取索引器ID成功：{indexer_id}，准备构建搜索URL")
+            logger.debug(f"【{self.plugin_name}】从domain提取索引器ID：{indexer_id}")
 
             # Build search parameters
             search_params = self._build_search_params(
@@ -956,7 +956,7 @@ class ProwlarrIndexer(_PluginBase):
                                             'placeholder': '',
                                             'hint': '在Prowlarr设置→通用→安全→API密钥中获取',
                                             'persistent-hint': True,
-                                            'type': 'text'
+                                            'type': 'password'
                                         }
                                     }
                                 ]

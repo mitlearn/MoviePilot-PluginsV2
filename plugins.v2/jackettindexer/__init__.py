@@ -41,9 +41,9 @@ class JackettIndexer(_PluginBase):
 
     # Plugin metadata
     plugin_name = "Jackett索引器"
-    plugin_desc = "集成Jackett索引器搜索，支持Torznab协议多站点搜索。"
+    plugin_desc = "集成Jackett索引器搜索，支持Torznab协议多站点搜索。仅索引私有站点。"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "0.7.2"
+    plugin_version = "0.9.0"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "jackettindexer_"
@@ -76,7 +76,7 @@ class JackettIndexer(_PluginBase):
         Args:
             config: Configuration dictionary from user settings
         """
-        logger.info(f"【{self.plugin_name}】★★★ 开始初始化插件 ★★★")
+        logger.info(f"【{self.plugin_name}】开始初始化插件")
         logger.debug(f"【{self.plugin_name}】收到配置：{config}")
 
         # Stop existing services
@@ -155,7 +155,7 @@ class JackettIndexer(_PluginBase):
             if not site_info:
                 new_indexer = copy.deepcopy(indexer)
                 self._sites_helper.add_indexer(domain, new_indexer)
-                logger.info(f"【{self.plugin_name}】✅ 新增到站点管理：{indexer.get('name')} (domain: {domain})")
+                logger.info(f"【{self.plugin_name}】新增到站点管理：{indexer.get('name')} (domain: {domain})")
                 registered_count += 1
             else:
                 logger.debug(f"【{self.plugin_name}】站点已存在，跳过：{indexer.get('name')} (domain: {domain})")
@@ -177,15 +177,24 @@ class JackettIndexer(_PluginBase):
 
             # Build indexer dicts
             self._indexers = []
+            filtered_count = 0
             for indexer_data in indexers:
                 try:
                     indexer_dict = self._build_indexer_dict(indexer_data)
+
+                    # 需求二：过滤掉公开站点，只保留私有站点
+                    if indexer_dict.get("public", False):
+                        indexer_name = indexer_dict.get("name", "Unknown")
+                        logger.info(f"【{self.plugin_name}】过滤公开站点：{indexer_name}")
+                        filtered_count += 1
+                        continue
+
                     self._indexers.append(indexer_dict)
                 except Exception as e:
                     logger.error(f"【{self.plugin_name}】构建索引器失败：{str(e)}")
                     continue
 
-            logger.info(f"【{self.plugin_name}】成功获取 {len(self._indexers)} 个索引器")
+            logger.info(f"【{self.plugin_name}】成功获取 {len(self._indexers)} 个私有索引器，过滤掉 {filtered_count} 个公开站点")
             return True
 
         except Exception as e:
@@ -227,6 +236,8 @@ class JackettIndexer(_PluginBase):
         """
         Fetch indexer list from Jackett API.
 
+        需求一：只获取已配置的索引器（通过configured=true参数）
+
         Returns:
             List of indexer dictionaries from Jackett API
         """
@@ -235,7 +246,7 @@ class JackettIndexer(_PluginBase):
             params = {
                 "apikey": self._api_key,
                 "t": "indexers",
-                "configured": "true"
+                "configured": "true"  # 需求一：只获取已配置（已认证）的索引器
             }
 
             logger.debug(f"【{self.plugin_name}】正在获取索引器列表：{url}")
@@ -258,7 +269,12 @@ class JackettIndexer(_PluginBase):
             # Parse XML response
             indexers = self._parse_indexers_xml(response.text)
 
-            logger.info(f"【{self.plugin_name}】获取到 {len(indexers)} 个索引器")
+            logger.info(f"【{self.plugin_name}】获取到 {len(indexers)} 个已配置的索引器")
+
+            # Debug log indexer types
+            for idx in indexers[:3]:
+                idx_type = idx.get("type", "未知")
+                logger.debug(f"【{self.plugin_name}】索引器示例：id={idx.get('id')}, title={idx.get('title')}, type={idx_type}")
 
             return indexers
 
@@ -418,12 +434,7 @@ class JackettIndexer(_PluginBase):
         Async wrapper for search_torrents.
         This is the actual method called by MoviePilot's async search system.
         """
-        # CRITICAL: Log IMMEDIATELY at method entry
-        import sys
-        sys.stderr.write(f"=== JACKETT async_search_torrents CALLED ===\n")
-        sys.stderr.flush()
-
-        logger.info(f"【{self.plugin_name}】★★★ async_search_torrents 方法被调用 ★★★")
+        logger.debug(f"【{self.plugin_name}】async_search_torrents 被调用")
 
         # Delegate to synchronous implementation
         return self.search_torrents(site, keyword, mtype, page)
@@ -449,17 +460,8 @@ class JackettIndexer(_PluginBase):
         Returns:
             List of TorrentInfo objects
         """
-        # CRITICAL: Log IMMEDIATELY at method entry - before ANY code
-        import sys
-        sys.stderr.write(f"=== JACKETT search_torrents CALLED ===\n")
-        sys.stderr.flush()
-
         results = []
-
-        # First line of the method - log immediately
-        logger.info(f"【{self.plugin_name}】★★★ search_torrents 方法被调用 ★★★")
-        logger.info(f"【{self.plugin_name}】site={site}, keyword={keyword}")
-        logger.info(f"【{self.plugin_name}】mtype={mtype}, page={page}")
+        logger.debug(f"【{self.plugin_name}】search_torrents 被调用: keyword={keyword}")
 
         try:
             # Debug: Log method call with all parameters
@@ -502,14 +504,14 @@ class JackettIndexer(_PluginBase):
                 logger.debug(f"【{self.plugin_name}】站点不属于本插件（站点：{site_prefix}，插件：{self.plugin_name}），跳过")
                 return results
 
-            logger.info(f"【{self.plugin_name}】站点匹配成功，准备搜索")
+            logger.debug(f"【{self.plugin_name}】站点匹配成功，准备搜索")
         except Exception as e:
             logger.error(f"【{self.plugin_name}】站点验证异常：{str(e)}\n{traceback.format_exc()}")
             return results
 
         try:
             # Log that method was called
-            logger.info(f"【{self.plugin_name}】开始搜索：站点={site_name}, 关键词={keyword}, 类型={mtype}, 页码={page}")
+            logger.info(f"【{self.plugin_name}】搜索：站点={site_name}, 关键词={keyword}")
 
             # Extract indexer ID from domain (matching reference implementation)
             # Domain format: jackett_indexer.{indexer_id}
@@ -536,7 +538,7 @@ class JackettIndexer(_PluginBase):
                 logger.warning(f"【{self.plugin_name}】从domain提取的索引器ID为空：{domain}")
                 return results
 
-            logger.info(f"【{self.plugin_name}】✓ 从domain提取索引器ID成功：{indexer_id}，准备构建搜索URL")
+            logger.debug(f"【{self.plugin_name}】从domain提取索引器ID：{indexer_id}")
 
             # Build search parameters
             search_params = self._build_search_params(
@@ -638,7 +640,7 @@ class JackettIndexer(_PluginBase):
             # Build URL for specific indexer
             url = f"{self._host}/api/v2.0/indexers/{indexer_id}/results/torznab/api"
 
-            logger.info(f"【{self.plugin_name}】API请求：{url}")
+            logger.debug(f"【{self.plugin_name}】API请求：{url}")
             logger.debug(f"【{self.plugin_name}】搜索参数：{params}")
 
             response = RequestUtils(proxies=self._proxy).get_res(
@@ -1063,7 +1065,7 @@ class JackettIndexer(_PluginBase):
                                             'placeholder': '',
                                             'hint': '在Jackett界面点击扳手图标获取API密钥',
                                             'persistent-hint': True,
-                                            'type': 'text'
+                                            'type': 'password'
                                         }
                                     }
                                 ]
