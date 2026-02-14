@@ -2,6 +2,9 @@
 
 MoviePilot 插件，集成 Prowlarr 和 Jackett 索引器搜索功能。
 
+> [!IMPORTANT]  
+> 如你所见，本项目由Vibe Coding而成，如有问题请详细提起Issues。若AI能修就能，不能则请忍住。
+
 ## 插件列表
 
 ### 1. ProwlarrIndexer - Prowlarr索引器
@@ -38,16 +41,17 @@ MoviePilot 插件，集成 Prowlarr 和 Jackett 索引器搜索功能。
 
 ### 方式一：自动安装（推荐）
 
-1. 将整个 `plugins.v2` 目录复制到 MoviePilot 的插件目录
-2. 将 `icons` 目录中的图标文件复制到 MoviePilot 的 `icons` 目录
-3. 将 `package.v2.json` 合并到 MoviePilot 的 `package.v2.json` 文件中
-4. 重启 MoviePilot
+1. 插件 - 插件市场 - 插件市场设置
+
+2. 新起一行添加本项目地址 `https://github.com/mitlearn/MoviePilot-PluginsV2/`，保存
+
+3. 点击更新按钮，找到本项目提供的插件
 
 ### 方式二：手动安装
 
-1. 在 MoviePilot 的 `plugins.v2` 目录下创建以下目录：
+1. 在 MoviePilot 的 `plugins` 目录下创建以下目录：
    ```
-   plugins.v2/
+   plugins/
    ├── prowlarrindexer/
    └── jackettindexer/
    ```
@@ -168,6 +172,8 @@ MoviePilot 插件，集成 Prowlarr 和 Jackett 索引器搜索功能。
 
 4. **验证配置**
    - 查看插件详情页，确认索引器已成功同步
+   - 复制插件详情页中的站点domain
+   - 站点管理 - 添加站点 - 站点域名填写复制的站点domain，其他不填，保存
    - 在 MoviePilot 搜索页面，应该能看到新增的站点
    - 执行搜索测试
 
@@ -326,52 +332,8 @@ prowalarr/
 │   └── Jackett_A.png           # Jackett 图标
 ├── package.v2.json             # 插件元数据
 ├── README.md                   # 本文件
-├── CHANGELOG.md                # 更新日志
-└── API_DOCUMENTATION.md        # API 文档
 
 ```
-
-### 代码规范
-
-- **语言**: Python 3.8+
-- **编码**: UTF-8
-- **风格**: PEP 8
-- **类型注解**: 完整的类型提示
-- **文档字符串**: Google 风格
-- **错误处理**: 全面的异常捕获和日志记录
-
-### 关键改进
-
-相比参考实现，本插件做了以下改进：
-
-1. **完整的数据结构**
-   - 包含 `torrents` 和 `parser` 字段防止系统崩溃
-
-2. **健壮的错误处理**
-   - 验证所有输入参数
-   - 捕获并记录所有异常
-   - 失败时返回空列表而非抛出异常
-
-3. **详细的日志记录**
-   - INFO 级别：正常操作
-   - WARNING 级别：可恢复的问题
-   - ERROR 级别：失败情况（含堆栈跟踪）
-
-4. **配置验证**
-   - 初始化时验证所有必需字段
-   - URL 格式检查
-   - API 连通性测试
-
-5. **资源管理**
-   - 正确关闭定时任务
-   - 注销索引器避免内存泄漏
-   - 异常情况下也能清理资源
-
-6. **用户体验**
-   - 清晰的配置表单
-   - 实时状态显示
-   - 索引器列表页面
-   - 友好的错误提示
 
 ## 故障排查
 
@@ -444,6 +406,7 @@ docker restart moviepilot
 
 ## 致谢
 
+- [ProwlarrExtend/JackettExtend](https://github.com/jtcymc/MoviePilot-PluginsV2) - 本项目起源
 - [MoviePilot](https://github.com/jxxghp/MoviePilot) - 优秀的媒体库管理工具
 - [Prowlarr](https://github.com/Prowlarr/Prowlarr) - 强大的索引器管理器
 - [Jackett](https://github.com/Jackett/Jackett) - 经典的索引器代理

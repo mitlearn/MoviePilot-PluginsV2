@@ -1,7 +1,7 @@
 {
   "ProwlarrIndexer": {
     "name": "Prowlarr索引器",
-    "description": "集成Prowlarr索引器搜索，支持多站点统一搜索。仅索引私有站点。",
+    "description": "集成Prowlarr索引器搜索，支持API多站点统一搜索。仅索引私有站点。",
     "labels": "indexer,prowlarr,torrent,search,private",
     "version": "0.9.0",
     "icon": "Prowlarr.png",
