@@ -450,12 +450,15 @@ class JackettIndexer(_PluginBase):
         domain = self.JACKETT_DOMAIN.replace(self.plugin_author.lower(), str(indexer_id))
 
         # Detect if indexer is public or private based on type
-        # Jackett types: "public", "semi-public", "private"
+        # Jackett types: "public", "semi-public", "private", or empty string
         # 只过滤公开站点，保留私有和半公开站点
-        is_public = indexer_type.lower() == "public"
+        # 注意：Jackett 很多索引器的 type 为空字符串，默认视为私有
+        is_public = indexer_type.lower() == "public" if indexer_type else False
 
         # Log type detection and domain generation
-        logger.debug(f"【{self.plugin_name}】索引器 {indexer_title} 类型：{indexer_type} -> {'公开' if is_public else '私有'}")
+        type_display = indexer_type if indexer_type else "(空)"
+        privacy_display = "公开" if is_public else "私有"
+        logger.debug(f"【{self.plugin_name}】索引器 {indexer_title} 类型：{type_display} -> {privacy_display}")
         logger.debug(f"【{self.plugin_name}】生成domain：{domain}，indexer_id={indexer_id} (类型：{type(indexer_id)})")
 
         # Get category information from indexer and check if XXX-only
@@ -1367,6 +1370,25 @@ class JackettIndexer(_PluginBase):
                                 ]
                             }
                         ]
+                    },
+                    {
+                        'component': 'VRow',
+                        'content': [
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12},
+                                'content': [
+                                    {
+                                        'component': 'VAlert',
+                                        'props': {
+                                            'type': 'warning',
+                                            'variant': 'tonal',
+                                            'text': '❓ 遇到问题？查看常见问题解答：https://github.com/mitlearn/MoviePilot-PluginsV2#-常见问题'
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
                     }
                 ]
             }
@@ -1394,7 +1416,6 @@ class JackettIndexer(_PluginBase):
             status_info.append(f'最后同步：{self._last_update.strftime("%Y-%m-%d %H:%M:%S")}')
 
         status_info.append(f'索引器数量：{len(self._indexers)}')
-        status_info.append('常见问题：https://github.com/mitlearn/MoviePilot-PluginsV2#-常见问题')
 
         # Build table rows
         items = []

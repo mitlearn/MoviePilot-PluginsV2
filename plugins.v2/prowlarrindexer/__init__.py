@@ -268,8 +268,8 @@ class ProwlarrIndexer(_PluginBase):
 
             # Debug log first few indexers
             for idx in enabled_indexers[:3]:
-                privacy = idx.get("privacy", 1)
-                privacy_str = {0: "公开", 1: "私有", 2: "半私有"}.get(privacy, "未知")
+                privacy = idx.get("privacy", "private")
+                privacy_str = {"public": "公开", "private": "私有", "semiPrivate": "半私有"}.get(privacy, f"未知({privacy})")
                 logger.debug(f"【{self.plugin_name}】索引器示例：id={idx.get('id')}, name={idx.get('name')}, 类型={privacy_str}")
 
             return enabled_indexers
@@ -408,13 +408,13 @@ class ProwlarrIndexer(_PluginBase):
         domain = self.PROWLARR_DOMAIN.replace(self.plugin_author.lower(), str(indexer_id))
 
         # Detect if indexer is public or private
-        # Prowlarr privacy: 0 = public, 1 = private, 2 = semi-private
+        # Prowlarr privacy: "public" = 公开, "private" = 私有, "semiPrivate" = 半私有
         # 只过滤公开站点，保留私有和半公开站点
-        privacy = indexer.get("privacy", 1)
-        is_public = privacy == 0  # 0=公开
+        privacy = indexer.get("privacy", "private")
+        is_public = (privacy == "public")  # "public"=公开
 
         # Log privacy detection and domain generation
-        privacy_str = {0: "公开", 1: "私有", 2: "半私有"}.get(privacy, "未知")
+        privacy_str = {"public": "公开", "private": "私有", "semiPrivate": "半私有"}.get(privacy, f"未知({privacy})")
         logger.debug(f"【{self.plugin_name}】索引器 {indexer_name} 隐私级别：{privacy_str} (privacy={privacy})")
         logger.debug(f"【{self.plugin_name}】生成domain：{domain}，indexer_id={indexer_id} (类型：{type(indexer_id)})")
 
@@ -1274,6 +1274,25 @@ class ProwlarrIndexer(_PluginBase):
                                 ]
                             }
                         ]
+                    },
+                    {
+                        'component': 'VRow',
+                        'content': [
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12},
+                                'content': [
+                                    {
+                                        'component': 'VAlert',
+                                        'props': {
+                                            'type': 'warning',
+                                            'variant': 'tonal',
+                                            'text': '❓ 遇到问题？查看常见问题解答：https://github.com/mitlearn/MoviePilot-PluginsV2#-常见问题'
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
                     }
                 ]
             }
@@ -1301,7 +1320,6 @@ class ProwlarrIndexer(_PluginBase):
             status_info.append(f'最后同步：{self._last_update.strftime("%Y-%m-%d %H:%M:%S")}')
 
         status_info.append(f'索引器数量：{len(self._indexers)}')
-        status_info.append('常见问题：https://github.com/mitlearn/MoviePilot-PluginsV2#-常见问题')
 
         # Build table rows
         items = []

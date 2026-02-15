@@ -2,8 +2,8 @@ API DOCUMENTS
 =============
 
 Prowlarr/Jackett Indexer Plugins for MoviePilot
-Version: 1.1.0
-Last Updated: 2026-02-14
+Version: 1.2.0
+Last Updated: 2026-02-15
 
 ========================================
 TABLE OF CONTENTS
@@ -57,11 +57,12 @@ search_torrents(site, keyword, mtype, page)
     Description: Search torrents through Prowlarr API
     Parameters:
         site (Dict): Site/indexer information dictionary
-        keyword (str): Search keyword
+        keyword (str): Search keyword or IMDb ID (e.g., "The Matrix" or "tt0133093")
         mtype (MediaType, optional): Media type (MOVIE or TV)
         page (int, optional): Page number for pagination (default: 0)
     Returns: List of TorrentInfo objects
     Raises: No exceptions raised, returns empty list on error
+    Note: Automatically detects and converts IMDb ID searches (v1.2.0+)
 
 async_search_torrents(site, keyword, mtype, page)
     Description: Async wrapper for search_torrents
@@ -200,6 +201,10 @@ domain (string, required)
 public (boolean, required)
     true: Public indexer (filtered by plugin)
     false: Private or semi-private indexer
+
+    Detection Logic:
+        Prowlarr: privacy field = "public" → true, others → false
+        Jackett: type field = "public" → true, others → false
 
 proxy (boolean, required)
     Always false in current implementation
@@ -364,12 +369,17 @@ Torznab Category Mapping:
 _build_search_params(keyword, indexer_id, mtype, page)
     Description: Build search parameters for API request
     Parameters:
-        keyword (str): Search keyword
+        keyword (str): Search keyword or IMDb ID
         indexer_id (int/str): Indexer identifier
         mtype (MediaType, optional): Media type
         page (int): Page number
     Returns: List of (key, value) tuples or dict
     Access: Private
+    Note:
+        - Detects IMDb ID format (tt + 7+ digits)
+        - For IMDb searches:
+            Prowlarr: Uses imdbId parameter (numeric part only)
+            Jackett: Uses t=movie/tvsearch + imdbid parameter (full ID)
 
 _search_prowlarr_api(params)
     Description: Execute Prowlarr API search request
@@ -433,23 +443,24 @@ _build_indexer_dict(indexer)
     Description: Build MoviePilot indexer dictionary
     Parameters:
         indexer (dict): Raw indexer data from API
-    Returns: Indexer dictionary (see section 4.1)
+    Returns: Tuple of (Indexer dictionary, is_xxx_only: bool)
     Access: Private
+    Note: v1.2.0+ returns tuple to optimize XXX filtering
 
 
 5.3 FILTER METHODS
 -------------------
 
-_is_xxx_only_indexer(indexer_data)
-    Description: Check if indexer only supports XXX categories
+_is_imdb_id(keyword)
+    Description: Check if keyword is an IMDb ID
     Parameters:
-        indexer_data (dict): Indexer data from API
-    Returns: bool (True if XXX-only)
-    Logic:
-        - Get indexer capabilities
-        - Extract top-level categories
-        - Return True if ONLY 6000 series exists
+        keyword (str): Search keyword
+    Returns: bool (True if IMDb ID format)
+    Pattern: ^tt\d{7,}$
+    Examples: "tt0133093", "tt8289930"
+    Static: Yes
     Access: Private
+    Added: v1.2.0
 
 _is_english_keyword(keyword)
     Description: Check if keyword is primarily English
@@ -472,9 +483,10 @@ _get_indexer_categories(indexer_id)
     Description: Get indexer categories and convert to MoviePilot format
     Parameters:
         indexer_id (int/str): Indexer identifier
-    Returns: Category dictionary or None
+    Returns: Tuple of (Category dictionary or None, is_xxx_only: bool)
     Format: See section 4.3
     Access: Private
+    Note: v1.2.0+ returns tuple to optimize XXX filtering
 
 Prowlarr Implementation:
     - Call /api/v1/indexer/{id}
@@ -536,8 +548,8 @@ All public methods have try-except blocks:
 7. EXAMPLES
 ========================================
 
-7.1 SEARCH EXAMPLE
--------------------
+7.1 SEARCH EXAMPLE (Keyword)
+-----------------------------
 
 Input:
     site = {
@@ -550,18 +562,51 @@ Input:
 
 Process:
     1. Validate parameters
-    2. Check keyword is English
-    3. Extract indexer_id from domain: 12
-    4. Build search params:
+    2. Check if keyword is IMDb ID: False
+    3. Check keyword is English: True
+    4. Extract indexer_id from domain: 12
+    5. Build search params:
         query: "The Matrix"
         indexerIds: 12
         categories: 2000
         limit: 100
         offset: 0
-    5. Call Prowlarr API: /api/v1/search?{params}
-    6. Parse JSON response
-    7. Convert each item to TorrentInfo
-    8. Return list
+    6. Call Prowlarr API: /api/v1/search?{params}
+    7. Parse JSON response
+    8. Convert each item to TorrentInfo
+    9. Return list
+
+
+7.1.1 SEARCH EXAMPLE (IMDb ID)
+-------------------------------
+
+Input:
+    site = {
+        "name": "Prowlarr索引器-M-Team",
+        "domain": "prowlarr_indexer.12"
+    }
+    keyword = "tt0133093"
+    mtype = MediaType.MOVIE
+    page = 0
+
+Process:
+    1. Validate parameters
+    2. Check if keyword is IMDb ID: True
+    3. Skip English keyword check (IMDb IDs are always valid)
+    4. Extract indexer_id from domain: 12
+    5. Build search params:
+        imdbId: "0133093"  (numeric part only)
+        indexerIds: 12
+        type: "search"
+        categories: 2000
+        limit: 100
+        offset: 0
+    6. Call Prowlarr API: /api/v1/search?{params}
+    7. Parse JSON response
+    8. Convert each item to TorrentInfo
+    9. Return list
+
+Note: Jackett uses full IMDb ID "tt0133093" with t=movie parameter
 
 Output:
     [
@@ -673,5 +718,29 @@ For more information, see:
 - Source code: plugins.v2/prowlarrindexer/__init__.py
 - Source code: plugins.v2/jackettindexer/__init__.py
 
-Last updated: 2026-02-14
-Version: 1.1.0
+Last updated: 2026-02-15
+Version: 1.2.0
+
+========================================
+CHANGELOG
+========================================
+
+v1.2.0 (2026-02-15)
+-------------------
+- Added IMDb ID search support (tt + 7+ digits format)
+- Fixed Prowlarr privacy field detection (string vs integer)
+- Fixed Jackett empty type field handling
+- Optimized XXX filtering (single API call per indexer)
+- Fixed NoneType errors in search method
+- Improved promotion flag parsing for Prowlarr (string array)
+
+v1.1.0 (2026-02-14)
+-------------------
+- Added category support for indexers
+- Improved search logging
+- Added XXX-only indexer filtering
+
+v1.0.0 (Initial Release)
+-------------------------
+- Basic Prowlarr and Jackett integration
+- Site registration and search functionality
