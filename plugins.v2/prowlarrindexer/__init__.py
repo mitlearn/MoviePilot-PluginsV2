@@ -53,7 +53,7 @@ class ProwlarrIndexer(_PluginBase):
     _host: str = ""
     _api_key: str = ""
     _proxy: bool = False
-    _cron: str = "0 0 */6 * *"  # Sync indexers every 6 hours
+    _cron: str = "0 0 */12 * *"  # Sync indexers every 12 hours
     _onlyonce: bool = False
     _indexers: List[Dict[str, Any]] = []
     _scheduler: Optional[BackgroundScheduler] = None
@@ -83,7 +83,7 @@ class ProwlarrIndexer(_PluginBase):
             self._host = config.get("host", "").rstrip("/")
             self._api_key = config.get("api_key", "")
             self._proxy = config.get("proxy", False)
-            self._cron = config.get("cron", "0 0 */6 * *")
+            self._cron = config.get("cron", "0 0 */12 * *")
             self._onlyonce = config.get("onlyonce", False)
 
         # Validate configuration
@@ -1251,8 +1251,8 @@ class ProwlarrIndexer(_PluginBase):
                                         'props': {
                                             'model': 'cron',
                                             'label': '同步周期',
-                                            'placeholder': '0 0 */6 * *',
-                                            'hint': 'Cron表达式，默认每6小时同步一次索引器',
+                                            'placeholder': '0 0 */12 * *',
+                                            'hint': 'Cron表达式，默认每12小时同步一次索引器',
                                             'persistent-hint': True
                                         }
                                     }
@@ -1301,7 +1301,7 @@ class ProwlarrIndexer(_PluginBase):
             "host": "",
             "api_key": "",
             "proxy": False,
-            "cron": "0 0 */6 * *",
+            "cron": "0 0 */12 * *",
             "onlyonce": False
         }
 

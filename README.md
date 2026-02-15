@@ -3,8 +3,7 @@
 <div align="center">
 
 ![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
-![MoviePilot](https://img.shields.io/badge/MoviePilot-v1.x%2B-green.svg)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
+![MoviePilot](https://img.shields.io/badge/MoviePilot-v2.x-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 **为 MoviePilot 提供 Prowlarr 和 Jackett 索引器集成**
@@ -22,7 +21,7 @@
 ## 📖 简介
 
 > [!IMPORTANT]
-> 如你所见，本项目由 AI Coding 而成，如有问题请详细提起 Issues。若 AI 能修就能，不能则请忍住。
+> 本项目由 AI Coding 而成。如遇问题，请在 Issues 中详细描述问题现象、错误日志及复现步骤。AI 能理解的问题就能修复，否则请自行动手或提交 PR，我们欢迎所有贡献！
 
 本项目提供两个 MoviePilot 插件，用于集成 Prowlarr 和 Jackett 索引器服务：
 
@@ -62,9 +61,8 @@
 
 ### 前置要求
 
-- [x] MoviePilot v1.x 或更高版本
+- [x] MoviePilot v2.x
 - [x] Prowlarr v1.0+ 或 Jackett v0.20+（至少其中之一）
-- [x] Python 3.10+
 
 ### 安装方法
 
@@ -73,7 +71,7 @@
 1. 在 MoviePilot 中打开 **设置 → 插件 → 插件市场**
 2. 点击右上角齿轮图标，添加本仓库地址：
    ```
-   https://github.com/YOUR_USERNAME/prowalarr.git
+   https://github.com/mitlearn/MoviePilot-PluginsV2
    ```
 3. 点击更新按钮，在插件列表中找到并安装插件
 
@@ -81,7 +79,7 @@
 
 1. 克隆本仓库：
    ```bash
-   git clone https://github.com/YOUR_USERNAME/prowalarr.git
+   git clone https://github.com/mitlearn/MoviePilot-PluginsV2.git
    ```
 
 2. 复制插件文件到 MoviePilot 插件目录：
@@ -107,7 +105,7 @@
 | 启用插件 | 开启插件功能 | ✅ |
 | 服务器地址 | Prowlarr 服务器地址（必须包含 http:// 或 https://） | `http://192.168.1.100:9696` |
 | API密钥 | 在 Prowlarr 设置→通用→安全→API密钥 中获取 | `1234567890abcdef` |
-| 同步周期 | Cron 表达式，设置定时同步频率 | `0 0 */6 * *` (每6小时) |
+| 同步周期 | Cron 表达式，设置定时同步频率 | `0 0 */12 * *` (每12小时) |
 | 使用代理 | 访问 Prowlarr 时是否使用系统代理 | ❌ |
 | 立即运行一次 | 保存后立即同步索引器列表 | ✅ |
 
@@ -130,12 +128,13 @@
 
 | 表达式 | 说明 |
 |--------|------|
-| `0 0 */6 * *` | 每6小时同步一次（推荐） |
-| `0 0 */12 * *` | 每12小时同步一次 |
-| `0 2 * * *` | 每天凌晨2点同步 |
+| `0 0 */12 * *` | 每12小时同步一次（推荐） |
+| `0 2 * * *` | 每天凌晨2点同步一次 |
+| `0 2 */3 * *` | 每3天凌晨2点同步一次 |
+| `0 2 1 * *` | 每月1日凌晨2点同步一次 |
 
 > [!TIP]
-> 建议设置较长的同步周期（如6-12小时），避免频繁请求 API。
+> 索引器变化不频繁，建议设置较长的同步周期（如每天或每3天），避免不必要的 API 请求。
 
 ### 代理设置
 
@@ -272,10 +271,12 @@ grep "过滤" logs/moviepilot.log
 
 ## 🙏 致谢
 
+- [ProwlarrExtend/JackettExtend](https://github.com/jtcymc/MoviePilot-PluginsV2) - 本项目的起源，为插件开发提供了宝贵的思路和参考实现
 - [MoviePilot](https://github.com/jxxghp/MoviePilot) - 优秀的媒体管理工具
-- [Prowlarr](https://github.com/Prowlarr/Prowlarr) - 索引器管理工具
-- [Jackett](https://github.com/Jackett/Jackett) - 索引器代理工具
-- [ProwlarrExtend/JackettExtend](https://github.com/jtcymc/MoviePilot-PluginsV2) - 本项目起源
+- [Prowlarr](https://github.com/Prowlarr/Prowlarr) - 强大的索引器管理工具
+- [Jackett](https://github.com/Jackett/Jackett) - 经典的索引器代理工具
+
+**Powered By** [Claude](https://claude.ai) - AI 编程助手
 
 ---
 
