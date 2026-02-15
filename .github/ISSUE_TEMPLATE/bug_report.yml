@@ -1,0 +1,163 @@
+name: 🐛 Bug Report / 问题报告
+description: 报告插件使用中遇到的问题
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 感谢您提交问题！
+
+        > 本项目由 AI Coding 而成。如遇问题，请详细描述问题现象、错误日志及复现步骤。AI 能理解的问题就能修复！
+
+        **提交前请确认：**
+        - [ ] 已查看 [常见问题](https://github.com/mitlearn/MoviePilot-PluginsV2#-常见问题)
+        - [ ] 已将 MoviePilot 日志等级设置为 DEBUG
+        - [ ] 已收集 MoviePilot 和 Prowlarr/Jackett 的日志
+
+  - type: dropdown
+    id: plugin
+    attributes:
+      label: 使用的插件
+      description: 请选择您遇到问题的插件
+      options:
+        - Prowlarr索引器
+        - Jackett索引器
+        - 两个都有问题
+    validations:
+      required: true
+
+  - type: input
+    id: moviepilot-version
+    attributes:
+      label: MoviePilot 版本
+      description: 在 MoviePilot 界面查看版本号
+      placeholder: "例如：v2.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: backend-version
+    attributes:
+      label: Prowlarr/Jackett 版本
+      description: 在对应服务界面查看版本号
+      placeholder: "例如：Prowlarr v1.10.0 或 Jackett v0.21.0"
+    validations:
+      required: true
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: 插件版本
+      description: 在插件设置中查看版本号
+      placeholder: "例如：v1.4.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      description: 您运行 MoviePilot 的环境
+      options:
+        - Docker
+        - Linux
+        - Windows
+        - macOS
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 详细描述您遇到的问题
+      placeholder: 请详细描述问题现象，包括什么时候出现、出现频率等
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 如何复现这个问题？
+      placeholder: |
+        1. 进入...
+        2. 点击...
+        3. 看到错误...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+      description: 您期望应该发生什么？
+      placeholder: 描述期望的正确行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 实际发生了什么？
+      placeholder: 描述实际发生的错误行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: moviepilot-logs
+    attributes:
+      label: MoviePilot 日志（DEBUG级别）
+      description: |
+        **如何获取：**
+        1. 进入 **设置 → 系统 → 日志等级**，选择 **DEBUG**，保存并重启
+        2. 复现问题后，进入 **设置 → 系统 → 实时日志**
+        3. 点击右上角 **新标签页打开**
+        4. 搜索（Ctrl+F）关键词：`Prowlarr索引器` 或 `Jackett索引器`
+        5. 复制与问题相关的日志内容（包括前后上下文）
+      placeholder: |
+        粘贴 MoviePilot DEBUG 日志...
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: backend-logs
+    attributes:
+      label: Prowlarr/Jackett 日志
+      description: |
+        **Prowlarr 日志获取：**
+        - 打开 **设置 → 通用 → 日志**，选择 **Debug**
+        - **设置 → 系统 → 日志 → 文件 → 下载**最新日志
+
+        **Jackett 日志获取：**
+        - 勾选 **Enhanced logging** 并保存
+        - 点击 **View logs** 或查看服务器日志文件
+      placeholder: |
+        粘贴 Prowlarr DEBUG 日志或 Jackett Enhanced 日志...
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: 其他信息
+      description: 截图、配置文件或其他补充信息
+      placeholder: 可以粘贴截图或其他相关信息
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: 确认
+      description: 请确认您已完成以下步骤
+      options:
+        - label: 我已经查看了常见问题文档
+          required: true
+        - label: 我已经将 MoviePilot 日志等级设置为 DEBUG
+          required: true
+        - label: 我已经收集了必要的日志信息
+          required: true

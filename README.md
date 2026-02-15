@@ -312,25 +312,38 @@ grep "过滤" logs/moviepilot.log
 【Prowlarr索引器】搜索完成：Prowlarr索引器-M-Team 从 125 条原始结果中解析出 120 个有效结果
 ```
 
-## 🤝 贡献
+## 🐛 报告问题
 
-欢迎提交 Issue 和 Pull Request！
+> [!IMPORTANT]
+> 本项目由 AI Coding 而成。如遇问题，请在 Issues 中详细描述问题现象、错误日志及复现步骤。AI 能理解的问题就能修复！
 
-### 报告问题
+### 提交 Issue
 
-提交 Issue 时请包含：
-- MoviePilot 版本
-- Prowlarr/Jackett 版本
-- 插件版本
-- 详细的错误信息和日志
-- 复现步骤
+点击 [创建 Issue](https://github.com/mitlearn/MoviePilot-PluginsV2/issues/new/choose) 并选择对应的模板：
 
-### 提交代码
+- **🐛 Bug Report**：报告使用中遇到的问题
+- **✨ Feature Request**：建议新功能或改进
 
-1. Fork 本仓库
-2. 创建特性分支
-3. 提交更改
-4. 创建 Pull Request
+### 提交前准备
+
+**1. 查看常见问题**
+- 先查看 [常见问题](#-常见问题) 章节，很多问题都有现成的解决方案
+
+**2. 收集日志（Bug Report 必需）**
+
+MoviePilot 日志：
+- 进入 **设置 → 系统 → 日志等级**，选择 **DEBUG**，保存并重启
+- 复现问题后，进入 **设置 → 系统 → 实时日志**
+- 点击右上角 **新标签页打开**，搜索（Ctrl+F）关键词
+- 复制与问题相关的日志（包括前后上下文）
+
+Prowlarr 日志（使用 Prowlarr 插件时）：
+- **设置 → 通用 → 日志**，选择 **Debug**
+- **设置 → 系统 → 日志 → 文件**，下载最新日志
+
+Jackett 日志（使用 Jackett 插件时）：
+- 勾选 **Enhanced logging** 并保存
+- 点击 **View logs** 查看日志
 
 ## 📄 许可证
 

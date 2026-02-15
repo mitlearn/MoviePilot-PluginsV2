@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 使用文档
+    url: https://github.com/mitlearn/MoviePilot-PluginsV2#-快速开始
+    about: 查看插件使用说明和配置指南
+  - name: ❓ 常见问题
+    url: https://github.com/mitlearn/MoviePilot-PluginsV2#-常见问题
+    about: 查看常见问题解答，可能已有解决方案
