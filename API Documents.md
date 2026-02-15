@@ -133,6 +133,7 @@ Example Response:
         "url": "http://192.168.1.100:9696/api/v1/indexer/12",
         "domain": "prowlarr_indexer.12",
         "public": false,
+        "privacy": "private",
         "proxy": false,
         "category": {
           "movie": [
@@ -165,6 +166,7 @@ Format:
         "url": str,             # API endpoint URL
         "domain": str,          # Fake domain identifier
         "public": bool,         # Whether indexer is public
+        "privacy": str,         # Privacy type (original value)
         "proxy": bool,          # Whether to use proxy
         "category": dict        # Optional: Category information
     }
@@ -195,6 +197,19 @@ public (boolean, required)
     Detection Logic:
         Prowlarr: privacy field = "public" → true, others → false
         Jackett: type field = "public" → true, others → false
+
+privacy (string, required)
+    Original privacy type from backend service
+
+    Prowlarr values:
+        "public": Public indexer
+        "private": Private indexer
+        "semiPrivate": Semi-private indexer
+
+    Jackett values:
+        "public": Public indexer
+        "private": Private indexer (or empty string, defaults to "private")
+        "semi-public": Semi-private indexer
 
 proxy (boolean, required)
     Always false in current implementation
@@ -629,6 +644,7 @@ Response:
         "url": "http://192.168.1.100:9696/api/v1/indexer/12",
         "domain": "prowlarr_indexer.12",
         "public": false,
+        "privacy": "private",
         "proxy": false,
         "category": {
           "movie": [
@@ -717,6 +733,10 @@ v1.4.0 (2026-02-15)
 - Removed grabs field: Prowlarr plugin no longer returns download count
 - Unified variable naming: Renamed all indexer_id to indexer_name for consistency
 - Improved error logging: Include indexer name in all error messages
+- Added privacy field: Store original privacy type from backend (public/private/semiPrivate/semi-public)
+- Improved UI display: Changed "公开站点？" to "隐私类型" showing "公开/半私有/私有"
+- Optimized data table: Use VDataTableVirtual with sortable columns and better performance
+- Updated configuration hints: Added step-by-step setup guide and API key instructions
 
 v1.3.0 (2026-02-15)
 -------------------

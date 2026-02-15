@@ -1239,7 +1239,7 @@ class ProwlarrIndexer(_PluginBase):
                                             'type': 'success',
                                             'variant': 'tonal',
                                             'border': 'start',
-                                            'text': '💡 详细使用说明和常见问题：https://github.com/mitlearn/MoviePilot-PluginsV2#-快速开始'
+                                            'text': '📖 使用说明：https://github.com/mitlearn/MoviePilot-PluginsV2#-快速开始\n❓ 常见问题：https://github.com/mitlearn/MoviePilot-PluginsV2#-常见问题'
                                         }
                                     }
                                 ]
@@ -1273,7 +1273,14 @@ class ProwlarrIndexer(_PluginBase):
 
         status_info.append(f'索引器数量：{len(self._indexers)}')
 
-        # Build table rows
+        # Build headers
+        headers = [
+            {'title': '索引器名称', 'key': 'name', 'sortable': True},
+            {'title': '站点domain', 'key': 'domain', 'sortable': True},
+            {'title': '隐私类型', 'key': 'privacy', 'sortable': True}
+        ]
+
+        # Build table items
         items = []
         if self._indexers:
             for site in self._indexers:
@@ -1287,21 +1294,9 @@ class ProwlarrIndexer(_PluginBase):
                     privacy_text = "私有"
 
                 items.append({
-                    'component': 'tr',
-                    'content': [
-                        {
-                            'component': 'td',
-                            'text': site.get("name", "Unknown")
-                        },
-                        {
-                            'component': 'td',
-                            'text': site.get("domain", "N/A")
-                        },
-                        {
-                            'component': 'td',
-                            'text': privacy_text
-                        }
-                    ]
+                    'name': site.get("name", "Unknown"),
+                    'domain': site.get("domain", "N/A"),
+                    'privacy': privacy_text
                 })
 
         # Build page elements
@@ -1330,50 +1325,31 @@ class ProwlarrIndexer(_PluginBase):
                 'content': [
                     {
                         'component': 'VCol',
-                        'props': {
-                            'cols': 12
-                        },
+                        'props': {'cols': 12},
                         'content': [
                             {
-                                'component': 'VTable',
+                                'component': 'VCard',
                                 'props': {
-                                    'hover': True
+                                    'class': 'pa-0'
                                 },
                                 'content': [
                                     {
-                                        'component': 'thead',
+                                        'component': 'VCardText',
                                         'content': [
                                             {
-                                                'component': 'tr',
-                                                'content': [
-                                                    {
-                                                        'component': 'th',
-                                                        'props': {
-                                                            'class': 'text-start ps-4'
-                                                        },
-                                                        'text': '索引器名称'
-                                                    },
-                                                    {
-                                                        'component': 'th',
-                                                        'props': {
-                                                            'class': 'text-start ps-4'
-                                                        },
-                                                        'text': '站点domain'
-                                                    },
-                                                    {
-                                                        'component': 'th',
-                                                        'props': {
-                                                            'class': 'text-start ps-4'
-                                                        },
-                                                        'text': '隐私类型'
-                                                    }
-                                                ]
+                                                'component': 'VDataTableVirtual',
+                                                'props': {
+                                                    'class': 'text-sm',
+                                                    'headers': headers,
+                                                    'items': items,
+                                                    'height': '30rem',
+                                                    'density': 'compact',
+                                                    'fixed-header': True,
+                                                    'hide-no-data': True,
+                                                    'hover': True
+                                                }
                                             }
                                         ]
-                                    },
-                                    {
-                                        'component': 'tbody',
-                                        'content': items
                                     }
                                 ]
                             }

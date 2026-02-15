@@ -56,28 +56,7 @@
 
 **Torznab 分类映射**:
 - `2000` 系列 → 电影分类
-- `5000` 系列 → 电视分类
-
-### 日志优化 (v1.4.0)
-
-> [!NOTE]
-> v1.4.0 重新设计了日志系统，使信息更加清晰简洁。
-
-**日志等级调整**:
-- **INFO**: 关键业务信息（同步完成、搜索开始/完成、过滤站点）
-- **WARNING**: 搜索失败原因（附带索引器名称和友好错误信息）
-- **ERROR**: 严重错误（配置错误、API异常）
-- **DEBUG**: 详细调试信息（参数验证、XML/JSON解析）
-
-**错误信息优化**:
-```
-# v1.3.0及之前
-【ERROR】搜索API请求失败：HTTP 200
-
-# v1.4.0
-【WARNING】索引器 [beyond-hd-api] 搜索失败：SSL connection could not be established
-【WARNING】索引器 [FileList] 搜索失败：Function Not Available: imdbid is not supported for TV search
-```
+- `5000` 系列 → 电影分类
 
 ## 🚀 快速开始
 
