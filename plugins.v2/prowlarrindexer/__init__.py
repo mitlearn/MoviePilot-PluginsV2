@@ -159,7 +159,7 @@ class ProwlarrIndexer(_PluginBase):
             xxx_filtered_count = 0
             for indexer_data in indexers:
                 try:
-                    indexer_dict = self._build_indexer_dict(indexer_data)
+                    indexer_dict, is_xxx_only = self._build_indexer_dict(indexer_data)
 
                     # 过滤掉公开站点，保留私有和半公开站点
                     if indexer_dict.get("public", False):
@@ -168,8 +168,8 @@ class ProwlarrIndexer(_PluginBase):
                         filtered_count += 1
                         continue
 
-                    # 需求三：过滤掉只有XXX分类的索引器
-                    if self._is_xxx_only_indexer(indexer_data):
+                    # 过滤掉只有XXX分类的索引器
+                    if is_xxx_only:
                         indexer_name = indexer_dict.get("name", "Unknown")
                         logger.info(f"【{self.plugin_name}】过滤仅XXX分类站点：{indexer_name}")
                         xxx_filtered_count += 1
@@ -278,7 +278,7 @@ class ProwlarrIndexer(_PluginBase):
             logger.error(f"【{self.plugin_name}】获取索引器列表异常：{str(e)}\n{traceback.format_exc()}")
             return []
 
-    def _get_indexer_categories(self, indexer_id: int) -> Optional[Dict[str, List[Dict[str, Any]]]]:
+    def _get_indexer_categories(self, indexer_id: int) -> Tuple[Optional[Dict[str, List[Dict[str, Any]]]], bool]:
         """
         Get indexer categories from Prowlarr API and convert to MoviePilot format.
 
@@ -286,7 +286,7 @@ class ProwlarrIndexer(_PluginBase):
             indexer_id: Prowlarr indexer ID
 
         Returns:
-            Category dictionary in MoviePilot format or None
+            Tuple of (Category dictionary in MoviePilot format or None, is_xxx_only)
         """
         try:
             # Get indexer capabilities from Prowlarr API
@@ -304,22 +304,22 @@ class ProwlarrIndexer(_PluginBase):
 
             if not response or response.status_code != 200:
                 logger.debug(f"【{self.plugin_name}】无法获取索引器 {indexer_id} 的分类信息")
-                return None
+                return None, False
 
             try:
                 indexer_detail = response.json()
             except Exception as e:
                 logger.debug(f"【{self.plugin_name}】解析索引器 {indexer_id} 详细信息失败：{str(e)}")
-                return None
+                return None, False
 
             # Get capabilities -> categories
             capabilities = indexer_detail.get("capabilities", {})
             if not capabilities:
-                return None
+                return None, False
 
             categories = capabilities.get("categories", [])
             if not categories:
-                return None
+                return None, False
 
             # Convert Prowlarr categories to MoviePilot format
             # Torznab categories: 2000=Movies, 5000=TV, 6000=XXX, etc.
@@ -327,6 +327,9 @@ class ProwlarrIndexer(_PluginBase):
                 "movie": [],
                 "tv": []
             }
+
+            # Track all top-level categories to detect XXX-only indexers
+            top_level_categories = set()
 
             for cat in categories:
                 if not isinstance(cat, dict):
@@ -341,6 +344,7 @@ class ProwlarrIndexer(_PluginBase):
                 try:
                     cat_num = int(cat_id)
                     top_level = (cat_num // 1000) * 1000
+                    top_level_categories.add(top_level)
 
                     # Build category entry
                     cat_entry = {
@@ -359,9 +363,16 @@ class ProwlarrIndexer(_PluginBase):
                 except (ValueError, TypeError):
                     continue
 
+            # Check if ONLY 6000 (XXX) category exists
+            is_xxx_only = (top_level_categories == {6000})
+
+            if is_xxx_only:
+                logger.debug(f"【{self.plugin_name}】索引器 {indexer_id} 仅包含XXX分类：{top_level_categories}")
+                return None, True
+
             # Return None if no movie/tv categories found
             if not category_map["movie"] and not category_map["tv"]:
-                return None
+                return None, False
 
             # Remove empty categories
             result = {}
@@ -373,93 +384,13 @@ class ProwlarrIndexer(_PluginBase):
             if result:
                 logger.debug(f"【{self.plugin_name}】索引器 {indexer_id} 分类：movie={len(result.get('movie', []))}, tv={len(result.get('tv', []))}")
 
-            return result if result else None
+            return (result if result else None), False
 
         except Exception as e:
             logger.debug(f"【{self.plugin_name}】获取索引器 {indexer_id} 分类信息异常：{str(e)}")
-            return None
+            return None, False
 
-    def _is_xxx_only_indexer(self, indexer_data: Dict[str, Any]) -> bool:
-        """
-        Check if indexer only supports XXX (adult) categories.
-
-        Args:
-            indexer_data: Prowlarr indexer data dictionary
-
-        Returns:
-            True if indexer only has XXX categories (6000 series), False otherwise
-        """
-        try:
-            indexer_id = indexer_data.get("id")
-            if not indexer_id:
-                return False
-
-            # Get indexer capabilities from Prowlarr API
-            url = f"{self._host}/api/v1/indexer/{indexer_id}"
-            headers = {
-                "X-Api-Key": self._api_key,
-                "Content-Type": "application/json",
-                "Accept": "application/json"
-            }
-
-            response = RequestUtils(
-                headers=headers,
-                proxies=self._proxy
-            ).get_res(url, timeout=15)
-
-            if not response or response.status_code != 200:
-                logger.debug(f"【{self.plugin_name}】无法获取索引器 {indexer_id} 的详细信息")
-                return False
-
-            try:
-                indexer_detail = response.json()
-            except Exception as e:
-                logger.debug(f"【{self.plugin_name}】解析索引器 {indexer_id} 详细信息失败：{str(e)}")
-                return False
-
-            # Get capabilities -> categories
-            capabilities = indexer_detail.get("capabilities", {})
-            if not capabilities:
-                logger.debug(f"【{self.plugin_name}】索引器 {indexer_id} 无capabilities信息")
-                return False
-
-            categories = capabilities.get("categories", [])
-            if not categories:
-                logger.debug(f"【{self.plugin_name}】索引器 {indexer_id} 无分类信息")
-                return False
-
-            # Extract all top-level category IDs
-            category_ids = set()
-            for cat in categories:
-                if isinstance(cat, dict):
-                    cat_id = cat.get("id")
-                    if cat_id:
-                        try:
-                            cat_num = int(cat_id)
-                            # Get top-level category (first digit determines main category)
-                            # 2000 = Movies, 5000 = TV, 6000 = XXX, etc.
-                            top_level = (cat_num // 1000) * 1000
-                            category_ids.add(top_level)
-                        except (ValueError, TypeError):
-                            continue
-
-            if not category_ids:
-                return False
-
-            # Check if ONLY 6000 (XXX) category exists
-            is_xxx_only = category_ids == {6000}
-
-            if is_xxx_only:
-                indexer_name = indexer_data.get("name", "Unknown")
-                logger.debug(f"【{self.plugin_name}】索引器 {indexer_name} 仅包含XXX分类：{category_ids}")
-
-            return is_xxx_only
-
-        except Exception as e:
-            logger.debug(f"【{self.plugin_name}】检查索引器XXX分类失败：{str(e)}")
-            return False
-
-    def _build_indexer_dict(self, indexer: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_indexer_dict(self, indexer: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
         """
         Build MoviePilot indexer dictionary from Prowlarr indexer data.
 
@@ -467,7 +398,7 @@ class ProwlarrIndexer(_PluginBase):
             indexer: Prowlarr indexer dictionary
 
         Returns:
-            MoviePilot compatible indexer dictionary
+            Tuple of (MoviePilot compatible indexer dictionary, is_xxx_only)
         """
         indexer_id = indexer.get("id")
         indexer_name = indexer.get("name", f"Indexer{indexer_id}")
@@ -487,8 +418,8 @@ class ProwlarrIndexer(_PluginBase):
         logger.debug(f"【{self.plugin_name}】索引器 {indexer_name} 隐私级别：{privacy_str} (privacy={privacy})")
         logger.debug(f"【{self.plugin_name}】生成domain：{domain}，indexer_id={indexer_id} (类型：{type(indexer_id)})")
 
-        # Get category information from indexer
-        category = self._get_indexer_categories(indexer_id)
+        # Get category information from indexer and check if XXX-only
+        category, is_xxx_only = self._get_indexer_categories(indexer_id)
 
         # Build indexer dictionary (matching ProwlarrExtend reference implementation)
         indexer_dict = {
@@ -504,7 +435,7 @@ class ProwlarrIndexer(_PluginBase):
         if category:
             indexer_dict["category"] = category
 
-        return indexer_dict
+        return indexer_dict, is_xxx_only
 
     def get_state(self) -> bool:
         """
@@ -543,7 +474,7 @@ class ProwlarrIndexer(_PluginBase):
 
     def get_module(self) -> Dict[str, Any]:
         """
-        Declare module methods to hijack system search and site testing.
+        Declare module methods to hijack system search.
 
         Returns:
             Dictionary mapping method names to plugin methods
@@ -552,13 +483,12 @@ class ProwlarrIndexer(_PluginBase):
             logger.debug(f"【{self.plugin_name}】get_module 被调用，但插件未启用，返回空字典")
             return {}
 
-        # Register search and test methods
+        # Register search methods
         result = {
             "search_torrents": self.search_torrents,
             "async_search_torrents": self.async_search_torrents,
-            "test_connection": self.test_connection,
         }
-        logger.debug(f"【{self.plugin_name}】get_module 被调用，注册 search_torrents, async_search_torrents 和 test_connection 方法")
+        logger.debug(f"【{self.plugin_name}】get_module 被调用，注册 search_torrents 和 async_search_torrents 方法")
         return result
 
     async def async_search_torrents(
@@ -691,10 +621,15 @@ class ProwlarrIndexer(_PluginBase):
         Returns:
             List of TorrentInfo objects
         """
+        # Initialize results first to ensure it always exists
         results = []
 
-        # 搜索发起日志（INFO级别）
-        site_name = site.get("name", "Unknown") if site else "Unknown"
+        # Safe extraction of site name
+        try:
+            site_name = site.get("name", "Unknown") if site and isinstance(site, dict) else "Unknown"
+        except Exception:
+            site_name = "Unknown"
+
         logger.info(f"【{self.plugin_name}】开始检索站点：{site_name}，关键词：{keyword}")
 
         try:
@@ -1366,6 +1301,7 @@ class ProwlarrIndexer(_PluginBase):
             status_info.append(f'最后同步：{self._last_update.strftime("%Y-%m-%d %H:%M:%S")}')
 
         status_info.append(f'索引器数量：{len(self._indexers)}')
+        status_info.append('常见问题：https://github.com/mitlearn/MoviePilot-PluginsV2#-常见问题')
 
         # Build table rows
         items = []

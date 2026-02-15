@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)
 ![MoviePilot](https://img.shields.io/badge/MoviePilot-v2.x-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
@@ -36,6 +36,7 @@
 
 - ✅ **自动同步索引器** - 自动从 Prowlarr/Jackett 同步已启用的索引器
 - ✅ **统一搜索接口** - 通过 MoviePilot 统一搜索所有索引器
+- ✅ **IMDb ID 搜索** - 支持 IMDb ID 精确搜索（v1.2.0+）
 - ✅ **站点分类支持** - 自动识别并添加电影/电视分类（v1.1.0+）
 - ✅ **促销识别** - 自动识别免费、半价、双倍上传等促销
 - ✅ **定时同步** - 支持 Cron 表达式定时同步索引器列表
@@ -113,14 +114,56 @@
 
 #### Jackett索引器
 
-配置项与 Prowlarr 插件相同，只需将服务器地址改为 Jackett 地址（默认端口 9117）。
+配置项与 Prowlarr 插件相同，服务器地址改为 Jackett 地址（默认端口 9117）。
+
+> [!TIP]
+> **API 密钥获取**：打开 Jackett Web 界面，在页面右上角可以直接看到 **API Key** 输入框，点击旁边的复制按钮即可。
 
 ### 验证安装
 
-查看插件详情页面：
-- 插件运行状态应该显示"运行中"
-- 已注册的索引器数量应该大于 0
-- 索引器列表中能看到站点信息
+#### 第一步：检查插件状态
+
+查看插件详情页面（**设置 → 插件 → [插件名称]**）：
+- ✅ 插件运行状态显示"运行中"
+- ✅ 已注册的索引器数量 > 0
+- ✅ 索引器列表中能看到站点信息（名称、domain）
+
+#### 第二步：添加站点到站点管理
+
+> [!IMPORTANT]
+> **必须执行此步骤**，否则插件无法参与搜索！
+
+1. 打开 **设置 → 站点管理 → 添加站点**
+2. 在插件详情页的索引器列表中，找到站点的 **domain**（如 `prowlarr_indexer.2`、`jackett_indexer.mteamtp`）
+3. 将该 domain 填入站点管理的 **站点地址** 字段
+4. 其他字段可以留空或随意填写（插件会忽略这些字段）
+5. 点击 **保存**
+6. 重复以上步骤，为每个索引器添加站点
+
+**示例**：
+
+| 插件详情页 | 站点管理 |
+|-----------|---------|
+| 索引器名称：`Prowlarr索引器-M-Team - TP`<br>站点domain：`prowlarr_indexer.2` | 站点地址：`prowlarr_indexer.2`<br>站点名称：`Prowlarr索引器-M-Team - TP`（可选）<br>Cookie/UA：留空 |
+
+> [!TIP]
+> **批量添加技巧**：
+> - 插件详情页的表格可以直接复制 domain
+> - 使用站点管理的"批量导入"功能（如果支持）
+> - 或者编写脚本自动添加（通过 MoviePilot API）
+
+#### 第三步：测试搜索
+
+1. 在 MoviePilot 搜索框输入英文关键词（如 `The Matrix`）
+2. 查看搜索结果中是否包含插件站点的资源
+3. 检查日志：
+   ```
+   【Prowlarr索引器】开始检索站点：Prowlarr索引器-M-Team - TP
+   【Prowlarr索引器】搜索完成：从 125 条原始结果中解析出 120 个有效结果
+   ```
+
+> [!WARNING]
+> 站点管理中的"测试连接"会失败，这是正常现象，不影响使用。详见 [常见问题](#-常见问题)。
 
 ## 📝 配置说明
 
@@ -154,12 +197,56 @@
 <summary><b>Q: 为什么站点管理中的"测试连接"显示失败？</b></summary>
 
 > [!WARNING]
-> 这是已知限制。插件使用的是伪域名，MoviePilot 的站点测试会尝试访问这个域名，因此会失败。
+> 这是已知限制，无法修复。插件使用虚拟域名（如 `prowlarr_indexer.2`、`jackett_indexer.mteamtp`）注册站点，MoviePilot 的站点测试会尝试 DNS 解析这些域名，因此必然失败。
+
+**错误示例**:
+```
+请求失败: Failed to resolve 'prowlarr_indexer.2'
+请求失败: Failed to resolve 'jackett_indexer.mteamtp'
+```
 
 **解决方案**:
+- **忽略该错误** - 不影响搜索功能
 - 站点连通性通过 Prowlarr/Jackett 本身的测试功能验证
 - 在 Prowlarr/Jackett 管理界面中查看索引器状态
-- 如果搜索功能正常，说明站点工作正常
+- 实际搜索测试：如果能搜索到结果，说明站点工作正常
+</details>
+
+<details>
+<summary><b>Q: 提示"未搜索到数据"但实际有搜索结果？</b></summary>
+
+**问题现象**:
+```
+【WARNING】Prowlarr索引器-FileList.io 未搜索到数据，耗时 0 秒
+【INFO】站点搜索完成，有效资源数：89
+```
+
+**原因**: MoviePilot 在统计搜索结果时可能未正确识别部分插件返回的数据。
+
+**解决方案**:
+- 如果搜索结果页面能看到资源，**忽略该警告**
+- 查看日志中"站点搜索完成"的资源数，确认是否真的有结果
+- 如果确实搜索不到结果：
+  - 检查搜索关键词是否为英文
+  - 检查 Prowlarr/Jackett 中对应索引器是否已启用且正常工作
+  - 在 Prowlarr/Jackett 中直接搜索测试
+</details>
+
+<details>
+<summary><b>Q: 搜索时提示"搜索出错：'NoneType' object has no attribute 'get'"？</b></summary>
+
+**问题现象**:
+```
+【ERROR】Prowlarr索引器-M-Team - TP 搜索出错：'NoneType' object has no attribute 'get'
+```
+
+**原因**: MoviePilot 传递给插件的参数异常，或插件版本过旧。
+
+**解决方案**:
+1. **升级到最新版本**（v1.2.0+）- 已修复该问题
+2. 重新同步索引器：启用插件的"立即运行一次"选项
+3. 如果问题仍存在，检查 MoviePilot 日志中是否有其他相关错误
+4. 尝试禁用→保存→启用→保存插件来重置状态
 </details>
 
 <details>
@@ -286,6 +373,6 @@ grep "过滤" logs/moviepilot.log
 
 Made with ❤️ by Claude
 
-**版本**: v1.1.0 | **更新日期**: 2026-02-14
+**版本**: v1.2.0 | **更新日期**: 2026-02-15
 
 </div>
