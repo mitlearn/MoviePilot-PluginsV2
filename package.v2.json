@@ -8,8 +8,8 @@
     "author": "Claude",
     "level": 2,
     "history": {
-      "v1.0.0": "符合官方规范的正式版本；简化索引器注册逻辑；移除不必要的get_indexer检查和copy.deepcopy；",
-      "v1.1.0": "功能增强版本：新增站点分类支持，自动从Prowlarr获取并转换Torznab分类(2000=电影,5000=电视)到MoviePilot格式；优化搜索日志，新增INFO级别搜索发起日志；调整get_module日志级别为DEBUG"
+      "v1.0.0": "符合官方规范的正式版本；简化索引器注册逻辑；",
+      "v1.1.0": "新增站点分类支持；优化搜索日志"
     }
   },
   "JackettIndexer": {
@@ -21,8 +21,7 @@
     "author": "Claude",
     "level": 2,
     "history": {
-      "v1.0.0": "符合官方规范的正式版本；简化索引器注册逻辑；移除不必要的get_indexer检查和copy.deepcopy；",
-      "v1.1.0": "功能增强版本：新增站点分类支持，自动从Prowlarr获取并转换Torznab分类(2000=电影,5000=电视)到MoviePilot格式；优化搜索日志，新增INFO级别搜索发起日志；调整get_module日志级别为DEBUG"
-    }
+      "v1.0.0": "符合官方规范的正式版本；简化索引器注册逻辑；",
+      "v1.1.0": "新增站点分类支持；优化搜索日志"    }
   }
 }
