@@ -1196,7 +1196,9 @@ class ProwlarrIndexer(_PluginBase):
                                         'props': {
                                             'type': 'info',
                                             'variant': 'tonal',
-                                            'text': '插件将自动同步Prowlarr中已启用的索引器，每个索引器将注册为一个站点。搜索时将通过Prowlarr API进行查询。'
+                                            'border': 'start',
+                                            'title': '配置步骤',
+                                            'text': '① 填写Prowlarr服务器地址和API密钥 → ② 保存并启用「立即运行一次」同步索引器 → ③ 在「站点管理」中添加站点（使用插件详情页的domain作为站点地址）'
                                         }
                                     }
                                 ]
@@ -1215,7 +1217,29 @@ class ProwlarrIndexer(_PluginBase):
                                         'props': {
                                             'type': 'warning',
                                             'variant': 'tonal',
-                                            'text': '❓ 遇到问题？查看常见问题解答：https://github.com/mitlearn/MoviePilot-PluginsV2#-常见问题'
+                                            'border': 'start',
+                                            'title': '获取API密钥',
+                                            'text': '在Prowlarr中打开「设置 → 通用 → 安全 → API密钥」即可查看和复制。'
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        'component': 'VRow',
+                        'content': [
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12},
+                                'content': [
+                                    {
+                                        'component': 'VAlert',
+                                        'props': {
+                                            'type': 'success',
+                                            'variant': 'tonal',
+                                            'border': 'start',
+                                            'text': '💡 详细使用说明和常见问题：https://github.com/mitlearn/MoviePilot-PluginsV2#-快速开始'
                                         }
                                     }
                                 ]
