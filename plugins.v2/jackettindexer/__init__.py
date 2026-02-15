@@ -42,7 +42,7 @@ class JackettIndexer(_PluginBase):
     plugin_name = "Jackett索引器"
     plugin_desc = "集成Jackett索引器搜索，支持Torznab协议多站点搜索。仅索引私有和半公开站点。"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "1.1.0"
+    plugin_version = "1.2.0"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "jackettindexer_"
@@ -573,10 +573,7 @@ class JackettIndexer(_PluginBase):
 
     def get_module(self) -> Dict[str, Any]:
         """
-        Declare module methods to hijack system search.
-
-        Note: 站点连通性测试无法通过 get_module 劫持，因为 MoviePilot 使用
-        SiteChain.test() 方法进行测试。test_connection 方法仅用于内部调用。
+        Declare module methods to hijack system search and site testing.
 
         Returns:
             Dictionary mapping method names to plugin methods
@@ -585,12 +582,13 @@ class JackettIndexer(_PluginBase):
             logger.debug(f"【{self.plugin_name}】get_module 被调用，但插件未启用，返回空字典")
             return {}
 
-        # Register search methods
+        # Register search and test methods
         result = {
             "search_torrents": self.search_torrents,
             "async_search_torrents": self.async_search_torrents,
+            "test_connection": self.test_connection,
         }
-        logger.debug(f"【{self.plugin_name}】get_module 被调用，注册 search_torrents 和 async_search_torrents 方法")
+        logger.debug(f"【{self.plugin_name}】get_module 被调用，注册 search_torrents, async_search_torrents 和 test_connection 方法")
         return result
 
     async def async_search_torrents(
@@ -741,12 +739,19 @@ class JackettIndexer(_PluginBase):
                 logger.debug(f"【{self.plugin_name}】关键词为空，返回空结果")
                 return results
 
+            # Check if keyword is IMDb ID (IMDb IDs are always valid)
+            is_imdb = self._is_imdb_id(keyword)
+
             # Filter non-English keywords (Jackett/Prowlarr work best with English)
-            if not self._is_english_keyword(keyword):
+            # Skip filter for IMDb IDs
+            if not is_imdb and not self._is_english_keyword(keyword):
                 logger.info(f"【{self.plugin_name}】检测到非英文关键词，跳过搜索：{keyword}")
                 return results
             else:
-                logger.debug(f"【{self.plugin_name}】关键词检查通过：{keyword}")
+                if is_imdb:
+                    logger.debug(f"【{self.plugin_name}】关键词检查通过（IMDb ID）：{keyword}")
+                else:
+                    logger.debug(f"【{self.plugin_name}】关键词检查通过：{keyword}")
 
             # Get site name for logging
             site_name = site.get("name", "Unknown")
@@ -838,7 +843,7 @@ class JackettIndexer(_PluginBase):
         Build Jackett Torznab API search parameters.
 
         Args:
-            keyword: Search keyword
+            keyword: Search keyword or IMDb ID
             mtype: Media type for category filtering
             page: Page number
 
@@ -848,14 +853,30 @@ class JackettIndexer(_PluginBase):
         # Determine categories based on media type
         categories = self._get_categories(mtype)
 
+        # Check if keyword is an IMDb ID (format: tt1234567)
+        is_imdb_id = self._is_imdb_id(keyword)
+
         # Build parameters
         params = {
             "apikey": self._api_key,
-            "t": "search",
-            "q": keyword,
             "limit": 100,
             "offset": page * 100 if page else 0,
         }
+
+        # Use IMDb ID search if detected
+        if is_imdb_id:
+            # For IMDb ID search, use t=movie or t=tvsearch
+            if mtype == MediaType.TV:
+                params["t"] = "tvsearch"
+            else:
+                # Default to movie search for IMDb IDs
+                params["t"] = "movie"
+            params["imdbid"] = keyword
+            logger.info(f"【{self.plugin_name}】检测到IMDb ID搜索：{keyword}，使用 {params['t']} 模式")
+        else:
+            # Regular keyword search
+            params["t"] = "search"
+            params["q"] = keyword
 
         # Add categories as comma-separated string
         if categories:
@@ -1175,6 +1196,23 @@ class JackettIndexer(_PluginBase):
 
         except Exception:
             return date_str  # Return original if parsing fails
+
+    @staticmethod
+    def _is_imdb_id(keyword: str) -> bool:
+        """
+        Check if keyword is an IMDb ID (format: tt followed by digits).
+
+        Args:
+            keyword: Search keyword to check
+
+        Returns:
+            True if keyword is an IMDb ID, False otherwise
+        """
+        if not keyword:
+            return False
+
+        # IMDb ID format: tt followed by at least 7 digits (e.g., tt0133093, tt8289930)
+        return bool(re.match(r'^tt\d{7,}$', keyword.strip()))
 
     @staticmethod
     def _is_english_keyword(keyword: str) -> bool:
