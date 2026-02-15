@@ -2,7 +2,7 @@ API DOCUMENTS
 =============
 
 Prowlarr/Jackett Indexer Plugins for MoviePilot
-Version: 1.3.0
+Version: 1.4.0
 Last Updated: 2026-02-15
 
 ========================================
@@ -70,13 +70,6 @@ async_search_torrents(site, keyword, mtype, page)
     Returns: List of TorrentInfo objects
     Note: Delegates to synchronous implementation
 
-test_connection(site)
-    Description: Test Prowlarr indexer connectivity
-    Parameters:
-        site (Dict): Site/indexer information dictionary
-    Returns: Tuple (success: bool, message: str)
-    Note: Returns (None, None) for non-plugin sites
-
 get_indexers()
     Description: Get list of registered indexers
     Returns: List of indexer dictionaries
@@ -101,9 +94,6 @@ search_torrents(site, keyword, mtype, page)
 
 async_search_torrents(site, keyword, mtype, page)
     Same as ProwlarrIndexer
-
-test_connection(site)
-    Same as ProwlarrIndexer, tests Jackett connectivity
 
 get_indexers()
     Same as ProwlarrIndexer
@@ -194,8 +184,8 @@ url (string, required)
     Jackett: "http://{host}/api/v2.0/indexers/{id}/results/torznab/"
 
 domain (string, required)
-    Prowlarr: "prowlarr_indexer.{indexer_id}"
-    Jackett: "jackett_indexer.{indexer_id}"
+    Prowlarr: "prowlarr_indexer.{indexer_name}"
+    Jackett: "jackett_indexer.{indexer_name}"
     Note: This is a fake domain for identification
 
 public (boolean, required)
@@ -229,8 +219,7 @@ Format:
         pubdate=str,
         imdbid=str,
         downloadvolumefactor=float,
-        uploadvolumefactor=float,
-        grabs=int
+        uploadvolumefactor=float
     )
 
 Field Details:
@@ -280,10 +269,6 @@ uploadvolumefactor (float)
     Upload factor
     1.0: Normal
     2.0: Double upload
-
-grabs (integer)
-    Number of completed downloads
-    Default: 0
 
 
 4.3 CATEGORY STRUCTURE
@@ -366,11 +351,11 @@ Torznab Category Mapping:
 5.1 SEARCH METHODS
 -------------------
 
-_build_search_params(keyword, indexer_id, mtype, page)
+_build_search_params(keyword, indexer_name, mtype, page)
     Description: Build search parameters for API request
     Parameters:
         keyword (str): Search keyword or IMDb ID
-        indexer_id (int/str): Indexer identifier
+        indexer_name (int/str): Indexer identifier
         mtype (MediaType, optional): Media type
         page (int): Page number
     Returns: List of (key, value) tuples or dict
@@ -388,10 +373,10 @@ _search_prowlarr_api(params)
     Returns: List of dictionaries (JSON response)
     Access: Private
 
-_search_jackett_api(indexer_id, params)
+_search_jackett_api(indexer_name, params)
     Description: Execute Jackett Torznab API search
     Parameters:
-        indexer_id (str): Indexer identifier
+        indexer_name (str): Indexer identifier
         params (dict): Search parameters
     Returns: List of dictionaries (parsed XML)
     Access: Private
@@ -479,10 +464,10 @@ _is_english_keyword(keyword)
 5.4 CATEGORY METHODS
 ---------------------
 
-_get_indexer_categories(indexer_id)
+_get_indexer_categories(indexer_name)
     Description: Get indexer categories and convert to MoviePilot format
     Parameters:
-        indexer_id (int/str): Indexer identifier
+        indexer_name (int/str): Indexer identifier
     Returns: Tuple of (Category dictionary or None, is_xxx_only: bool)
     Format: See section 4.3
     Access: Private
@@ -564,7 +549,7 @@ Process:
     1. Validate parameters
     2. Check if keyword is IMDb ID: False
     3. Check keyword is English: True
-    4. Extract indexer_id from domain: 12
+    4. Extract indexer_name from domain: 12
     5. Build search params:
         query: "The Matrix"
         indexerIds: 12
@@ -593,7 +578,7 @@ Process:
     1. Validate parameters
     2. Check if keyword is IMDb ID: True
     3. Skip English keyword check (IMDb IDs are always valid)
-    4. Extract indexer_id from domain: 12
+    4. Extract indexer_name from domain: 12
     5. Build search params:
         imdbId: "0133093"  (numeric part only)
         indexerIds: 12
@@ -621,8 +606,7 @@ Output:
             pubdate="2023-06-15 12:34:56",
             imdbid="tt0133093",
             downloadvolumefactor=0.0,
-            uploadvolumefactor=1.0,
-            grabs=1234
+            uploadvolumefactor=1.0
         )
     ]
 
@@ -719,18 +703,27 @@ For more information, see:
 - Source code: plugins.v2/jackettindexer/__init__.py
 
 Last updated: 2026-02-15
-Version: 1.3.0
+Version: 1.4.0
 
 ========================================
 CHANGELOG
 ========================================
+
+v1.4.0 (2026-02-15)
+-------------------
+- Optimized error message display: Parse and show friendly error messages from Prowlarr/Jackett
+- Adjusted log levels: Info logs more concise, Debug logs more detailed
+- Removed connectivity test feature: Deleted test_connection() method
+- Removed grabs field: Prowlarr plugin no longer returns download count
+- Unified variable naming: Renamed all indexer_id to indexer_name for consistency
+- Improved error logging: Include indexer name in all error messages
 
 v1.3.0 (2026-02-15)
 -------------------
 - Fixed XXX filtering logic: Only filter pure adult sites, keep Music/Audio/etc sites
 - Enhanced API request logging: Show full URLs for all requests (indexer list, search, etc)
 - Verified field types based on real API data (Prowlarr privacy=string, Jackett type=string)
-- Improved debug logging: Show indexer ID and full request URL when searching
+- Improved debug logging: Show indexer name and full request URL when searching
 - Fixed over-aggressive filtering that removed music indexers (DICMusic, OpenCD, etc)
 
 v1.2.0 (2026-02-15)

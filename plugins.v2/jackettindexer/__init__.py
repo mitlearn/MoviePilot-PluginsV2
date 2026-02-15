@@ -42,7 +42,7 @@ class JackettIndexer(_PluginBase):
     plugin_name = "Jackett索引器"
     plugin_desc = "集成Jackett索引器搜索，支持Torznab协议多站点搜索。仅索引私有和半公开站点。"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "1.3.0"
+    plugin_version = "1.4.0"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "jackettindexer_"
@@ -167,15 +167,13 @@ class JackettIndexer(_PluginBase):
 
                     # 过滤掉公开站点，保留私有和半公开站点
                     if indexer_dict.get("public", False):
-                        indexer_name = indexer_dict.get("name", "Unknown")
-                        logger.info(f"【{self.plugin_name}】过滤公开站点：{indexer_name}")
+                        logger.info(f"【{self.plugin_name}】过滤公开站点：{indexer_dict.get('name', 'Unknown')}")
                         filtered_count += 1
                         continue
 
                     # 过滤掉只有XXX分类的索引器
                     if is_xxx_only:
-                        indexer_name = indexer_dict.get("name", "Unknown")
-                        logger.debug(f"【{self.plugin_name}】过滤仅XXX分类站点：{indexer_name}")
+                        logger.debug(f"【{self.plugin_name}】过滤仅XXX分类站点：{indexer_dict.get('name', 'Unknown')}")
                         xxx_filtered_count += 1
                         continue
 
@@ -328,19 +326,19 @@ class JackettIndexer(_PluginBase):
             logger.error(f"【{self.plugin_name}】解析XML失败：{str(e)}")
             return []
 
-    def _get_indexer_categories(self, indexer_id: str) -> Tuple[Optional[Dict[str, List[Dict[str, Any]]]], bool]:
+    def _get_indexer_categories(self, indexer_name: str) -> Tuple[Optional[Dict[str, List[Dict[str, Any]]]], bool]:
         """
         Get indexer categories from Jackett Torznab API and convert to MoviePilot format.
 
         Args:
-            indexer_id: Jackett indexer identifier
+            indexer_name: Jackett indexer identifier
 
         Returns:
             Tuple of (Category dictionary in MoviePilot format or None, is_xxx_only)
         """
         try:
             # Get indexer capabilities using Torznab API
-            url = f"{self._host}/api/v2.0/indexers/{indexer_id}/results/torznab/api"
+            url = f"{self._host}/api/v2.0/indexers/{indexer_name}/results/torznab/api"
             params = {
                 "apikey": self._api_key,
                 "t": "caps"
@@ -353,7 +351,7 @@ class JackettIndexer(_PluginBase):
             )
 
             if not response or response.status_code != 200:
-                logger.debug(f"【{self.plugin_name}】无法获取索引器 {indexer_id} 的分类信息")
+                logger.debug(f"【{self.plugin_name}】无法获取索引器 {indexer_name} 的分类信息")
                 return None, False
 
             # Parse XML response
@@ -361,7 +359,7 @@ class JackettIndexer(_PluginBase):
                 dom_tree = xml.dom.minidom.parseString(response.text)
                 root_node = dom_tree.documentElement
             except Exception as e:
-                logger.debug(f"【{self.plugin_name}】解析索引器 {indexer_id} XML失败：{str(e)}")
+                logger.debug(f"【{self.plugin_name}】解析索引器 {indexer_name} XML失败：{str(e)}")
                 return None, False
 
             # Find all category elements
@@ -418,13 +416,13 @@ class JackettIndexer(_PluginBase):
             is_xxx_only = has_xxx and not has_other_content
 
             if is_xxx_only:
-                logger.debug(f"【{self.plugin_name}】索引器 {indexer_id} 仅包含XXX分类，顶层分类：{sorted(top_level_categories)}")
+                logger.debug(f"【{self.plugin_name}】索引器 {indexer_name} 仅包含XXX分类，顶层分类：{sorted(top_level_categories)}")
                 return None, True
 
             # If indexer has no movie/tv categories, still allow it (might be Music, Audio, etc.)
             # Just don't add movie/tv category info
             if not category_map["movie"] and not category_map["tv"]:
-                logger.debug(f"【{self.plugin_name}】索引器 {indexer_id} 无电影/电视分类（可能是音乐/其他类型站点），顶层分类：{sorted(top_level_categories)}")
+                logger.debug(f"【{self.plugin_name}】索引器 {indexer_name} 无电影/电视分类（可能是音乐/其他类型站点），顶层分类：{sorted(top_level_categories)}")
                 # Return None for category but False for is_xxx_only (allow the indexer)
                 return None, False
 
@@ -436,12 +434,12 @@ class JackettIndexer(_PluginBase):
                 result["tv"] = category_map["tv"]
 
             if result:
-                logger.debug(f"【{self.plugin_name}】索引器 {indexer_id} 分类：movie={len(result.get('movie', []))}, tv={len(result.get('tv', []))}")
+                logger.debug(f"【{self.plugin_name}】索引器 {indexer_name} 分类：movie={len(result.get('movie', []))}, tv={len(result.get('tv', []))}")
 
             return (result if result else None), False
 
         except Exception as e:
-            logger.debug(f"【{self.plugin_name}】获取索引器 {indexer_id} 分类信息异常：{str(e)}")
+            logger.debug(f"【{self.plugin_name}】获取索引器 {indexer_name} 分类信息异常：{str(e)}")
             return None, False
 
     def _build_indexer_dict(self, indexer: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
@@ -454,13 +452,13 @@ class JackettIndexer(_PluginBase):
         Returns:
             Tuple of (MoviePilot compatible indexer dictionary, is_xxx_only)
         """
-        indexer_id = indexer.get("id", "")
-        indexer_title = indexer.get("title", f"Indexer-{indexer_id}")
+        indexer_name = indexer.get("id", "")
+        indexer_title = indexer.get("title", indexer_name)
         indexer_type = indexer.get("type", "")
 
         # Build domain identifier (matching JackettExtend reference implementation)
-        # Replace author part with indexer_id: "jackett_indexer.claude" -> "jackett_indexer.{indexer_id}"
-        domain = self.JACKETT_DOMAIN.replace(self.plugin_author.lower(), str(indexer_id))
+        # Replace author part with indexer_name: "jackett_indexer.claude" -> "jackett_indexer.{indexer_name}"
+        domain = self.JACKETT_DOMAIN.replace(self.plugin_author.lower(), str(indexer_name))
 
         # Detect if indexer is public or private based on type
         # Jackett types: "public", "semi-public", "private", or empty string
@@ -472,16 +470,16 @@ class JackettIndexer(_PluginBase):
         type_display = indexer_type if indexer_type else "(空)"
         privacy_display = "公开" if is_public else "私有"
         logger.debug(f"【{self.plugin_name}】索引器 {indexer_title} 类型：{type_display} -> {privacy_display}")
-        logger.debug(f"【{self.plugin_name}】生成domain：{domain}，indexer_id={indexer_id} (类型：{type(indexer_id)})")
+        logger.debug(f"【{self.plugin_name}】生成domain：{domain}，indexer_name={indexer_name} (类型：{type(indexer_name)})")
 
         # Get category information from indexer and check if XXX-only
-        category, is_xxx_only = self._get_indexer_categories(indexer_id)
+        category, is_xxx_only = self._get_indexer_categories(indexer_name)
 
         # Build indexer dictionary (matching JackettExtend reference implementation exactly)
         indexer_dict = {
             "id": f"{self.plugin_name}-{indexer_title}",
             "name": f"{self.plugin_name}-{indexer_title}",
-            "url": f"{self._host.rstrip('/')}/api/v2.0/indexers/{indexer_id}/results/torznab/",
+            "url": f"{self._host.rstrip('/')}/api/v2.0/indexers/{indexer_name}/results/torznab/",
             "domain": domain,
             "public": is_public,
             "proxy": False,
@@ -563,94 +561,6 @@ class JackettIndexer(_PluginBase):
         # Delegate to synchronous implementation
         return self.search_torrents(site, keyword, mtype, page)
 
-    def test_connection(self, site: Dict[str, Any]) -> Tuple[bool, str]:
-        """
-        Test Jackett indexer connectivity.
-
-        This method replaces the default site connectivity test for Jackett indexers.
-        Instead of testing the fake domain, it tests the actual Jackett server.
-
-        Args:
-            site: Site/indexer information dictionary
-
-        Returns:
-            Tuple of (success: bool, message: str)
-        """
-        site_name = site.get("name", "Unknown") if site else "Unknown"
-        logger.debug(f"【{self.plugin_name}】开始测试站点连通性：{site_name}")
-
-        try:
-            # Validate site belongs to this plugin
-            if site is None or not isinstance(site, dict):
-                return False, "站点参数无效"
-
-            site_name_value = site.get("name", "")
-            if not site_name_value:
-                return False, "站点名称为空"
-
-            site_prefix = site_name_value.split("-")[0] if "-" in site_name_value else site_name_value
-            if site_prefix != self.plugin_name:
-                logger.debug(f"【{self.plugin_name}】站点不属于本插件，跳过测试：{site_name}")
-                # 返回 None 让系统使用默认测试方法
-                return None, None
-
-            # Extract indexer ID from domain
-            domain = site.get("domain", "")
-            if not domain:
-                return False, "缺少 domain 字段"
-
-            domain_clean = domain.replace("http://", "").replace("https://", "").rstrip("/")
-            indexer_id = domain_clean.split(".")[-1]
-
-            if not indexer_id:
-                return False, "无法从 domain 提取索引器 ID"
-
-            logger.debug(f"【{self.plugin_name}】测试索引器 {indexer_id} 的连通性")
-
-            # Test Jackett API connectivity by getting indexer capabilities
-            url = f"{self._host}/api/v2.0/indexers/{indexer_id}/results/torznab/api"
-            params = {
-                "apikey": self._api_key,
-                "t": "caps"
-            }
-
-            response = RequestUtils(proxies=self._proxy).get_res(
-                url=url,
-                params=params,
-                timeout=10
-            )
-
-            if not response:
-                logger.warning(f"【{self.plugin_name}】站点 {site_name} 连通性测试失败：无响应")
-                return False, f"Jackett 服务器无响应"
-
-            if response.status_code != 200:
-                logger.warning(f"【{self.plugin_name}】站点 {site_name} 连通性测试失败：HTTP {response.status_code}")
-                return False, f"Jackett 返回错误：HTTP {response.status_code}"
-
-            # Check if response is valid XML
-            try:
-                dom_tree = xml.dom.minidom.parseString(response.text)
-                root_node = dom_tree.documentElement
-
-                # Check for error response
-                if root_node.tagName == "error":
-                    error_code = root_node.getAttribute("code")
-                    error_desc = root_node.getAttribute("description")
-                    logger.warning(f"【{self.plugin_name}】站点 {site_name} 连通性测试失败：{error_desc}")
-                    return False, f"Jackett 错误：{error_desc}"
-
-            except Exception as e:
-                logger.warning(f"【{self.plugin_name}】站点 {site_name} 连通性测试失败：XML解析错误")
-                return False, f"Jackett 响应格式错误"
-
-            logger.debug(f"【{self.plugin_name}】站点 {site_name} 连通性测试成功")
-            return True, f"Jackett 索引器连接正常"
-
-        except Exception as e:
-            logger.error(f"【{self.plugin_name}】站点 {site_name} 连通性测试异常：{str(e)}\n{traceback.format_exc()}")
-            return False, f"测试异常：{str(e)}"
-
     def search_torrents(
         self,
         site: Dict[str, Any],
@@ -672,95 +582,70 @@ class JackettIndexer(_PluginBase):
         Returns:
             List of TorrentInfo objects
         """
-        # Initialize results first to ensure it always exists
+        # Initialize results
         results = []
 
-        # Safe extraction of site name
-        try:
-            site_name = site.get("name", "Unknown") if site and isinstance(site, dict) else "Unknown"
-        except Exception:
-            site_name = "Unknown"
+        # Validate inputs first
+        if site is None or not isinstance(site, dict):
+            logger.debug(f"【{self.plugin_name}】站点参数无效")
+            return results
+
+        if not keyword:
+            logger.debug(f"【{self.plugin_name}】关键词为空")
+            return results
+
+        # Extract site name
+        site_name = site.get("name", "")
+        if not site_name:
+            logger.warning(f"【{self.plugin_name}】站点名称为空")
+            return results
+
+        # Check if this site belongs to our plugin
+        site_prefix = site_name.split("-")[0] if "-" in site_name else site_name
+        if site_prefix != self.plugin_name:
+            return results
 
         logger.info(f"【{self.plugin_name}】开始检索站点：{site_name}，关键词：{keyword}")
 
         try:
-            # Debug: Log method call with all parameters
-            logger.debug(f"【{self.plugin_name}】search_torrents 被调用，site type={type(site)}, keyword={keyword}")
-
-            # Validate inputs first (matching reference implementation pattern)
-            if site is None:
-                logger.debug(f"【{self.plugin_name}】站点参数为 None，返回空结果")
-                return results
-
-            if not isinstance(site, dict):
-                logger.error(f"【{self.plugin_name}】站点参数类型错误：期望 dict，得到 {type(site)}")
-                return results
-
-            if not keyword:
-                logger.debug(f"【{self.plugin_name}】关键词为空，返回空结果")
-                return results
-
             # Check if keyword is IMDb ID (IMDb IDs are always valid)
             is_imdb = self._is_imdb_id(keyword)
 
             # Filter non-English keywords (Jackett/Prowlarr work best with English)
-            # Skip filter for IMDb IDs
             if not is_imdb and not self._is_english_keyword(keyword):
                 logger.debug(f"【{self.plugin_name}】检测到非英文关键词，跳过搜索：{keyword}")
                 return results
-            else:
-                if is_imdb:
-                    logger.debug(f"【{self.plugin_name}】关键词检查通过（IMDb ID）：{keyword}")
-                else:
-                    logger.debug(f"【{self.plugin_name}】关键词检查通过：{keyword}")
-
-            # Get site name for logging
-            site_name = site.get("name", "Unknown")
-            logger.debug(f"【{self.plugin_name}】站点名称：{site_name}")
-
-            # Check if this site belongs to our plugin (matching reference implementation)
-            site_name_value = site.get("name", "")
-            if not site_name_value:
-                logger.warning(f"【{self.plugin_name}】站点名称为空，返回空结果")
-                return results
-
-            site_prefix = site_name_value.split("-")[0] if "-" in site_name_value else site_name_value
-
-            if site_prefix != self.plugin_name:
-                return results
-
-            logger.debug(f"【{self.plugin_name}】站点匹配成功，准备搜索")
         except Exception as e:
             logger.error(f"【{self.plugin_name}】站点验证异常：{str(e)}\n{traceback.format_exc()}")
             return results
 
         try:
             # Extract indexer ID from domain (matching reference implementation)
-            # Domain format: jackett_indexer.{indexer_id}
+            # Domain format: jackett_indexer.{indexer_name}
             domain = site.get("domain", "")
             if not domain:
                 logger.warning(f"【{self.plugin_name}】站点缺少 domain 字段：{site_name}")
                 return results
 
             # Extract indexer ID from domain (matching reference implementation)
-            # domain 原始格式: "jackett_indexer.{indexer_id}"
-            # 但MoviePilot存储时会转换为URL格式: "http://jackett_indexer.{indexer_id}/"
+            # domain 原始格式: "jackett_indexer.{indexer_name}"
+            # 但MoviePilot存储时会转换为URL格式: "http://jackett_indexer.{indexer_name}/"
             # 需要先剥离URL格式，再提取ID
-            logger.debug(f"【{self.plugin_name}】准备从domain提取indexer_id，domain={domain}")
+            logger.debug(f"【{self.plugin_name}】准备从domain提取indexer_name，domain={domain}")
 
             # 剥离URL格式：移除协议前缀和尾部斜杠
             domain_clean = domain.replace("http://", "").replace("https://", "").rstrip("/")
             logger.debug(f"【{self.plugin_name}】清理后的domain：{domain_clean}")
 
             # 从清理后的domain提取ID（最后一个点后面的部分）
-            indexer_id = domain_clean.split(".")[-1]
-            logger.debug(f"【{self.plugin_name}】提取结果：indexer_id={indexer_id}")
+            indexer_name = domain_clean.split(".")[-1]
+            logger.debug(f"【{self.plugin_name}】提取结果：indexer_name={indexer_name}")
 
-            if not indexer_id:
+            if not indexer_name:
                 logger.warning(f"【{self.plugin_name}】从domain提取的索引器ID为空：{domain}")
                 return results
 
-            logger.debug(f"【{self.plugin_name}】从domain提取索引器ID：{indexer_id}")
+            logger.debug(f"【{self.plugin_name}】从domain提取索引器ID：{indexer_name}")
 
             # Build search parameters
             search_params = self._build_search_params(
@@ -769,10 +654,10 @@ class JackettIndexer(_PluginBase):
                 page=page
             )
 
-            logger.debug(f"【{self.plugin_name}】开始搜索站点：{site_name}，关键词：{keyword}，索引器ID：{indexer_id}")
+            logger.debug(f"【{self.plugin_name}】开始搜索站点：{site_name}，关键词：{keyword}，索引器ID：{indexer_name}")
 
             # Execute search API call
-            xml_content = self._search_jackett_api(indexer_id, search_params)
+            xml_content = self._search_jackett_api(indexer_name, search_params)
 
             if not xml_content:
                 logger.debug(f"【{self.plugin_name}】搜索未返回结果")
@@ -865,12 +750,12 @@ class JackettIndexer(_PluginBase):
         else:
             return [2000, 5000]
 
-    def _search_jackett_api(self, indexer_id: str, params: Dict[str, Any]) -> Optional[str]:
+    def _search_jackett_api(self, indexer_name: str, params: Dict[str, Any]) -> Optional[str]:
         """
         Execute Jackett Torznab API search request.
 
         Args:
-            indexer_id: Jackett indexer identifier
+            indexer_name: Jackett indexer identifier
             params: Query parameters dictionary
 
         Returns:
@@ -878,14 +763,14 @@ class JackettIndexer(_PluginBase):
         """
         try:
             # Build URL for specific indexer
-            url = f"{self._host}/api/v2.0/indexers/{indexer_id}/results/torznab/api"
+            url = f"{self._host}/api/v2.0/indexers/{indexer_name}/results/torznab/api"
 
             # Build query string for debug logging
             from urllib.parse import urlencode
             query_string = urlencode(params)
             full_url = f"{url}?{query_string}"
 
-            logger.debug(f"【{self.plugin_name}】正在搜索 Jackett 索引器 [{indexer_id}]: {full_url}")
+            logger.debug(f"【{self.plugin_name}】正在搜索 Jackett 索引器 [{indexer_name}]: {full_url}")
             logger.debug(f"【{self.plugin_name}】搜索参数：{params}")
 
             response = RequestUtils(proxies=self._proxy).get_res(
@@ -932,7 +817,7 @@ class JackettIndexer(_PluginBase):
                 # Check if response is an error
                 error_message = self._parse_jackett_error(xml_content)
                 if error_message:
-                    logger.warning(f"【{self.plugin_name}】索引器 [{indexer_id}] 搜索失败：{error_message}")
+                    logger.warning(f"【{self.plugin_name}】索引器 [{indexer_name}] 搜索失败：{error_message}")
                     return None
 
                 logger.debug(f"【{self.plugin_name}】成功获取响应，长度：{len(xml_content)}")
@@ -1172,7 +1057,7 @@ class JackettIndexer(_PluginBase):
 
     def _parse_jackett_error(self, xml_content: str) -> Optional[str]:
         """
-        Parse Jackett error XML response and extract friendly error message.
+        Parse Jackett error XML response and extract error message.
 
         Args:
             xml_content: XML response string
@@ -1198,40 +1083,29 @@ class JackettIndexer(_PluginBase):
             error_desc = root_node.getAttribute("description")
 
             if not error_desc:
-                return f"错误代码 {error_code}" if error_code else "未知错误"
+                return f"Error code {error_code}" if error_code else "Unknown error"
 
-            # Extract meaningful error message from stack trace
-            # Common patterns:
-            # 1. "Exception (indexer-name): actual error message"
-            # 2. SSL connection errors
-            # 3. Timeout errors
-            # 4. Indexer unavailable
-
+            # Extract the first line of the description (main error message)
             error_lines = error_desc.split('\n')
             first_line = error_lines[0].strip() if error_lines else error_desc
 
-            # Try to extract the root cause
+            # Try to extract cleaner error message
+            # Format: "Jackett.Common.IndexerException: Exception (indexer-name): actual error message"
             if "Exception" in first_line and ":" in first_line:
-                # Extract message after the exception type
-                parts = first_line.split(":", 2)
-                if len(parts) >= 2:
-                    # Get the actual error message
+                # Split by colon and get the last meaningful part
+                parts = first_line.split(":")
+                if len(parts) >= 3:
+                    # Format: ["Jackett.Common.IndexerException", " Exception (indexer-name)", " actual message"]
+                    # Combine last two parts for context
+                    message = ":".join(parts[-2:]).strip()
+                    return message
+                elif len(parts) >= 2:
+                    # Just return the part after exception type
                     message = parts[-1].strip()
+                    return message
 
-                    # Simplify common error patterns
-                    if "SSL connection could not be established" in error_desc or "unexpected EOF" in error_desc:
-                        return f"SSL连接失败（{message}）"
-                    elif "timeout" in message.lower():
-                        return f"请求超时（{message}）"
-                    elif "unavailable" in message.lower():
-                        return f"索引器不可用（{message}）"
-                    else:
-                        return message
-                else:
-                    return first_line
-            else:
-                # Return first line as-is if no exception pattern found
-                return first_line[:200]  # Limit length
+            # Return first line as-is
+            return first_line
 
         except Exception as e:
             logger.debug(f"【{self.plugin_name}】解析错误响应失败：{str(e)}")

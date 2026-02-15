@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)
 ![MoviePilot](https://img.shields.io/badge/MoviePilot-v2.x-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
@@ -41,6 +41,7 @@
 - ✅ **促销识别** - 自动识别免费、半价、双倍上传等促销
 - ✅ **定时同步** - 支持 Cron 表达式定时同步索引器列表
 - ✅ **代理支持** - 支持使用系统代理访问服务
+- ✅ **友好错误提示** - 智能解析并显示搜索失败原因（v1.4.0+）
 
 ### 智能过滤
 
@@ -56,6 +57,27 @@
 **Torznab 分类映射**:
 - `2000` 系列 → 电影分类
 - `5000` 系列 → 电视分类
+
+### 日志优化 (v1.4.0)
+
+> [!NOTE]
+> v1.4.0 重新设计了日志系统，使信息更加清晰简洁。
+
+**日志等级调整**:
+- **INFO**: 关键业务信息（同步完成、搜索开始/完成、过滤站点）
+- **WARNING**: 搜索失败原因（附带索引器名称和友好错误信息）
+- **ERROR**: 严重错误（配置错误、API异常）
+- **DEBUG**: 详细调试信息（参数验证、XML/JSON解析）
+
+**错误信息优化**:
+```
+# v1.3.0及之前
+【ERROR】搜索API请求失败：HTTP 200
+
+# v1.4.0
+【WARNING】索引器 [beyond-hd-api] 搜索失败：SSL connection could not be established
+【WARNING】索引器 [FileList] 搜索失败：Function Not Available: imdbid is not supported for TV search
+```
 
 ## 🚀 快速开始
 
@@ -161,9 +183,6 @@
    【Prowlarr索引器】搜索完成：从 125 条原始结果中解析出 120 个有效结果
    ```
 
-> [!WARNING]
-> 站点管理中的"测试连接"会失败，这是正常现象，不影响使用。详见 [常见问题](#-常见问题)。
-
 ## 📝 配置说明
 
 ### 同步周期
@@ -195,8 +214,8 @@
 <details>
 <summary><b>Q: 为什么站点管理中的"测试连接"显示失败？</b></summary>
 
-> [!WARNING]
-> 这是已知限制，无法修复。插件使用虚拟域名（如 `prowlarr_indexer.2`、`jackett_indexer.mteamtp`）注册站点，MoviePilot 的站点测试会尝试 DNS 解析这些域名，因此必然失败。
+> [!NOTE]
+> 这是已知限制。插件使用虚拟域名（如 `prowlarr_indexer.2`、`jackett_indexer.mteamtp`）注册站点，MoviePilot 的站点测试会尝试 DNS 解析这些域名，因此可能失败。
 
 **错误示例**:
 ```
@@ -230,9 +249,6 @@
   - 检查 Prowlarr/Jackett 中对应索引器是否已启用且正常工作
   - 在 Prowlarr/Jackett 中直接搜索测试
 </details>
-
-<details>
-<summary><b>Q: 搜索时提示"搜索出错：'NoneType' object has no attribute 'get'"？</b></summary>
 
 <details>
 <summary><b>Q: 为什么搜索中文关键词没有结果？</b></summary>
