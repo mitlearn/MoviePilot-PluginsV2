@@ -421,7 +421,7 @@ class ProwlarrIndexer(_PluginBase):
         # Log privacy detection and domain generation
         privacy_str = {"public": "公开", "private": "私有", "semiPrivate": "半私有"}.get(privacy, f"未知({privacy})")
         logger.debug(f"【{self.plugin_name}】索引器 {indexer_title} 隐私级别：{privacy_str} (privacy={privacy})")
-        logger.debug(f"【{self.plugin_name}】生成domain：{domain}，indexer_name={indexer_name} (类型：{type(indexer_name)})")
+        logger.debug(f"【{self.plugin_name}】生成domain：{domain}，indexer_name={indexer_name} (类型：{type(indexer_name).__name__})")
 
         # Get category information from indexer and check if XXX-only
         category, is_xxx_only = self._get_indexer_categories(indexer_name)
@@ -433,6 +433,7 @@ class ProwlarrIndexer(_PluginBase):
             "url": f"{self._host.rstrip('/')}/api/v1/indexer/{indexer_name}",
             "domain": domain,
             "public": is_public,
+            "privacy": privacy,  # 存储原始隐私类型
             "proxy": False,
         }
 
@@ -615,7 +616,7 @@ class ProwlarrIndexer(_PluginBase):
                 return results
 
             # Parse results to TorrentInfo
-            logger.debug(f"【{self.plugin_name}】开始解析 {len(api_results)} 条API结果")
+            logger.debug(f"【{self.plugin_name}】索引器 [{indexer_name}] 开始解析 {len(api_results)} 条API结果")
             for idx, item in enumerate(api_results):
                 try:
                     if item is None:
@@ -804,7 +805,8 @@ class ProwlarrIndexer(_PluginBase):
                 logger.error(f"【{self.plugin_name}】API返回格式错误：期望列表，得到 {type(data)}")
                 return []
 
-            logger.debug(f"【{self.plugin_name}】成功获取 {len(data)} 条搜索结果")
+            indexer_info = f"索引器 [{indexer_name}] " if indexer_name else ""
+            logger.debug(f"【{self.plugin_name}】{indexer_info}成功获取 {len(data)} 条搜索结果")
             return data
 
         except Exception as e:
@@ -1251,6 +1253,15 @@ class ProwlarrIndexer(_PluginBase):
         items = []
         if self._indexers:
             for site in self._indexers:
+                # 根据隐私类型显示对应文字
+                privacy = site.get("privacy", "private")
+                if privacy == "public":
+                    privacy_text = "公开"
+                elif privacy == "semiPrivate":
+                    privacy_text = "半私有"
+                else:  # private 或其他
+                    privacy_text = "私有"
+
                 items.append({
                     'component': 'tr',
                     'content': [
@@ -1264,7 +1275,7 @@ class ProwlarrIndexer(_PluginBase):
                         },
                         {
                             'component': 'td',
-                            'text': '是' if site.get("public", False) else '否'
+                            'text': privacy_text
                         }
                     ]
                 })
@@ -1330,7 +1341,7 @@ class ProwlarrIndexer(_PluginBase):
                                                         'props': {
                                                             'class': 'text-start ps-4'
                                                         },
-                                                        'text': '公开站点？'
+                                                        'text': '隐私类型'
                                                     }
                                                 ]
                                             }

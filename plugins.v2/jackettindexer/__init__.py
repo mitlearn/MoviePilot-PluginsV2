@@ -470,7 +470,7 @@ class JackettIndexer(_PluginBase):
         type_display = indexer_type if indexer_type else "(空)"
         privacy_display = "公开" if is_public else "私有"
         logger.debug(f"【{self.plugin_name}】索引器 {indexer_title} 类型：{type_display} -> {privacy_display}")
-        logger.debug(f"【{self.plugin_name}】生成domain：{domain}，indexer_name={indexer_name} (类型：{type(indexer_name)})")
+        logger.debug(f"【{self.plugin_name}】生成domain：{domain}，indexer_name={indexer_name} (类型：{type(indexer_name).__name__})")
 
         # Get category information from indexer and check if XXX-only
         category, is_xxx_only = self._get_indexer_categories(indexer_name)
@@ -482,6 +482,7 @@ class JackettIndexer(_PluginBase):
             "url": f"{self._host.rstrip('/')}/api/v2.0/indexers/{indexer_name}/results/torznab/",
             "domain": domain,
             "public": is_public,
+            "privacy": indexer_type if indexer_type else "private",  # 存储原始隐私类型
             "proxy": False,
         }
 
@@ -669,7 +670,7 @@ class JackettIndexer(_PluginBase):
                 return results
 
             # Parse XML results to TorrentInfo
-            logger.debug(f"【{self.plugin_name}】开始解析XML内容，长度：{len(xml_content)}")
+            logger.debug(f"【{self.plugin_name}】索引器 [{indexer_name}] 开始解析XML内容，长度：{len(xml_content)}")
             results = self._parse_torznab_xml(xml_content, site_name)
 
             logger.info(f"【{self.plugin_name}】搜索完成：{site_name} 返回 {len(results)} 个结果")
@@ -820,7 +821,7 @@ class JackettIndexer(_PluginBase):
                     logger.warning(f"【{self.plugin_name}】索引器 [{indexer_name}] 搜索失败：{error_message}")
                     return None
 
-                logger.debug(f"【{self.plugin_name}】成功获取响应，长度：{len(xml_content)}")
+                logger.debug(f"【{self.plugin_name}】索引器 [{indexer_name}] 成功获取响应，长度：{len(xml_content)}")
                 return xml_content
             except Exception as e:
                 logger.error(f"【{self.plugin_name}】读取响应text属性失败：{str(e)}")
@@ -1387,6 +1388,15 @@ class JackettIndexer(_PluginBase):
         items = []
         if self._indexers:
             for site in self._indexers:
+                # 根据隐私类型显示对应文字
+                privacy = site.get("privacy", "private")
+                if privacy.lower() == "public":
+                    privacy_text = "公开"
+                elif privacy.lower() == "semi-public":
+                    privacy_text = "半私有"
+                else:  # private 或其他
+                    privacy_text = "私有"
+
                 items.append({
                     'component': 'tr',
                     'content': [
@@ -1400,7 +1410,7 @@ class JackettIndexer(_PluginBase):
                         },
                         {
                             'component': 'td',
-                            'text': '是' if site.get("public", False) else '否'
+                            'text': privacy_text
                         }
                     ]
                 })
@@ -1466,7 +1476,7 @@ class JackettIndexer(_PluginBase):
                                                         'props': {
                                                             'class': 'text-start ps-4'
                                                         },
-                                                        'text': '公开站点？'
+                                                        'text': '隐私类型'
                                                     }
                                                 ]
                                             }
