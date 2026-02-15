@@ -175,7 +175,7 @@ class JackettIndexer(_PluginBase):
                     # 过滤掉只有XXX分类的索引器
                     if is_xxx_only:
                         indexer_name = indexer_dict.get("name", "Unknown")
-                        logger.info(f"【{self.plugin_name}】过滤仅XXX分类站点：{indexer_name}")
+                        logger.debug(f"【{self.plugin_name}】过滤仅XXX分类站点：{indexer_name}")
                         xxx_filtered_count += 1
                         continue
 
@@ -577,7 +577,7 @@ class JackettIndexer(_PluginBase):
             Tuple of (success: bool, message: str)
         """
         site_name = site.get("name", "Unknown") if site else "Unknown"
-        logger.info(f"【{self.plugin_name}】开始测试站点连通性：{site_name}")
+        logger.debug(f"【{self.plugin_name}】开始测试站点连通性：{site_name}")
 
         try:
             # Validate site belongs to this plugin
@@ -644,7 +644,7 @@ class JackettIndexer(_PluginBase):
                 logger.warning(f"【{self.plugin_name}】站点 {site_name} 连通性测试失败：XML解析错误")
                 return False, f"Jackett 响应格式错误"
 
-            logger.info(f"【{self.plugin_name}】站点 {site_name} 连通性测试成功")
+            logger.debug(f"【{self.plugin_name}】站点 {site_name} 连通性测试成功")
             return True, f"Jackett 索引器连接正常"
 
         except Exception as e:
@@ -706,7 +706,7 @@ class JackettIndexer(_PluginBase):
             # Filter non-English keywords (Jackett/Prowlarr work best with English)
             # Skip filter for IMDb IDs
             if not is_imdb and not self._is_english_keyword(keyword):
-                logger.info(f"【{self.plugin_name}】检测到非英文关键词，跳过搜索：{keyword}")
+                logger.debug(f"【{self.plugin_name}】检测到非英文关键词，跳过搜索：{keyword}")
                 return results
             else:
                 if is_imdb:
@@ -725,10 +725,8 @@ class JackettIndexer(_PluginBase):
                 return results
 
             site_prefix = site_name_value.split("-")[0] if "-" in site_name_value else site_name_value
-            logger.debug(f"【{self.plugin_name}】站点前缀：'{site_prefix}', 插件名称：'{self.plugin_name}', 匹配：{site_prefix == self.plugin_name}")
 
             if site_prefix != self.plugin_name:
-                logger.debug(f"【{self.plugin_name}】站点不属于本插件（站点：{site_prefix}，插件：{self.plugin_name}），跳过")
                 return results
 
             logger.debug(f"【{self.plugin_name}】站点匹配成功，准备搜索")
@@ -835,7 +833,7 @@ class JackettIndexer(_PluginBase):
                 # Default to movie search for IMDb IDs
                 params["t"] = "movie"
             params["imdbid"] = keyword
-            logger.info(f"【{self.plugin_name}】检测到IMDb ID搜索：{keyword}，使用 {params['t']} 模式")
+            logger.debug(f"【{self.plugin_name}】检测到IMDb ID搜索：{keyword}，使用 {params['t']} 模式")
         else:
             # Regular keyword search
             params["t"] = "search"
@@ -930,6 +928,13 @@ class JackettIndexer(_PluginBase):
                 if xml_content is None or xml_content == '':
                     logger.warning(f"【{self.plugin_name}】响应内容为空")
                     return None
+
+                # Check if response is an error
+                error_message = self._parse_jackett_error(xml_content)
+                if error_message:
+                    logger.warning(f"【{self.plugin_name}】索引器 [{indexer_id}] 搜索失败：{error_message}")
+                    return None
+
                 logger.debug(f"【{self.plugin_name}】成功获取响应，长度：{len(xml_content)}")
                 return xml_content
             except Exception as e:
@@ -1164,6 +1169,73 @@ class JackettIndexer(_PluginBase):
 
         except Exception:
             return date_str  # Return original if parsing fails
+
+    def _parse_jackett_error(self, xml_content: str) -> Optional[str]:
+        """
+        Parse Jackett error XML response and extract friendly error message.
+
+        Args:
+            xml_content: XML response string
+
+        Returns:
+            Error message string if this is an error response, None otherwise
+        """
+        try:
+            # Quick check if this looks like an error response
+            if not xml_content or '<error' not in xml_content:
+                return None
+
+            # Parse XML
+            dom_tree = xml.dom.minidom.parseString(xml_content)
+            root_node = dom_tree.documentElement
+
+            # Check if root node is an error element
+            if root_node.tagName != "error":
+                return None
+
+            # Extract error information
+            error_code = root_node.getAttribute("code")
+            error_desc = root_node.getAttribute("description")
+
+            if not error_desc:
+                return f"错误代码 {error_code}" if error_code else "未知错误"
+
+            # Extract meaningful error message from stack trace
+            # Common patterns:
+            # 1. "Exception (indexer-name): actual error message"
+            # 2. SSL connection errors
+            # 3. Timeout errors
+            # 4. Indexer unavailable
+
+            error_lines = error_desc.split('\n')
+            first_line = error_lines[0].strip() if error_lines else error_desc
+
+            # Try to extract the root cause
+            if "Exception" in first_line and ":" in first_line:
+                # Extract message after the exception type
+                parts = first_line.split(":", 2)
+                if len(parts) >= 2:
+                    # Get the actual error message
+                    message = parts[-1].strip()
+
+                    # Simplify common error patterns
+                    if "SSL connection could not be established" in error_desc or "unexpected EOF" in error_desc:
+                        return f"SSL连接失败（{message}）"
+                    elif "timeout" in message.lower():
+                        return f"请求超时（{message}）"
+                    elif "unavailable" in message.lower():
+                        return f"索引器不可用（{message}）"
+                    else:
+                        return message
+                else:
+                    return first_line
+            else:
+                # Return first line as-is if no exception pattern found
+                return first_line[:200]  # Limit length
+
+        except Exception as e:
+            logger.debug(f"【{self.plugin_name}】解析错误响应失败：{str(e)}")
+            return None
 
     @staticmethod
     def _is_imdb_id(keyword: str) -> bool:
