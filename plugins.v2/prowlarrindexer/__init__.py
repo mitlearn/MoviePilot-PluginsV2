@@ -16,17 +16,21 @@ from datetime import datetime, timedelta
 from urllib.parse import urlencode
 import unicodedata
 
+from typing import Type
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.core.context import MediaInfo, TorrentInfo
+from app.core.event import eventmanager, Event
 from app.core.metainfo import MetaInfo
 from app.helper.sites import SitesHelper
 from app.log import logger
 from app.plugins import _PluginBase
-from app.schemas.types import MediaType
+from app.schemas.types import MediaType, EventType
 from app.utils.http import RequestUtils
 from app.utils.string import StringUtils
+
+from .agenttool import SearchTorrentsTool, ListIndexersTool
 
 
 class ProwlarrIndexer(_PluginBase):
@@ -41,7 +45,7 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "Prowlarr索引器"
     plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。仅索引私有和半公开站点。"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "1.4.0"
+    plugin_version = "1.5.0"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "prowlarrindexer_"
@@ -1368,6 +1372,81 @@ class ProwlarrIndexer(_PluginBase):
         """
         return self._indexers if self._indexers else []
 
+    def api_search(self, keyword: str, indexer_id: int = None, mtype: str = None, page: int = 0) -> List[Dict[str, Any]]:
+        """
+        API搜索端点：搜索种子资源
+
+        Args:
+            keyword: 搜索关键词（必填）
+            indexer_id: Prowlarr索引器ID（可选，不填则搜索所有索引器）
+            mtype: 媒体类型，movie或tv（可选）
+            page: 页码，默认0
+
+        Returns:
+            种子信息列表，每个种子包含：title, size, seeders, peers, page_url, enclosure等字段
+        """
+        if not self._enabled:
+            return []
+
+        if not keyword:
+            return []
+
+        # 转换媒体类型字符串为MediaType枚举
+        media_type = None
+        if mtype:
+            if mtype.lower() == "movie":
+                media_type = MediaType.MOVIE
+            elif mtype.lower() == "tv":
+                media_type = MediaType.TV
+
+        results = []
+
+        # 如果指定了索引器ID，只搜索该索引器
+        if indexer_id:
+            # 查找对应的索引器
+            target_indexer = None
+            for indexer in self._indexers:
+                domain = indexer.get("domain", "")
+                # 从domain中提取索引器ID
+                domain_clean = domain.replace("http://", "").replace("https://", "").rstrip("/")
+                idx_id_str = domain_clean.split(".")[-1]
+                if idx_id_str.isdigit() and int(idx_id_str) == indexer_id:
+                    target_indexer = indexer
+                    break
+
+            if target_indexer:
+                torrents = self.search_torrents(target_indexer, keyword, media_type, page)
+                results.extend(torrents)
+        else:
+            # 搜索所有索引器
+            for indexer in self._indexers:
+                try:
+                    torrents = self.search_torrents(indexer, keyword, media_type, page)
+                    results.extend(torrents)
+                except Exception as e:
+                    logger.error(f"【{self.plugin_name}】搜索索引器 {indexer.get('name')} 失败：{str(e)}")
+                    continue
+
+        # 转换TorrentInfo对象为字典
+        return [
+            {
+                "title": t.title,
+                "description": t.description,
+                "enclosure": t.enclosure,
+                "page_url": t.page_url,
+                "size": t.size,
+                "seeders": t.seeders,
+                "peers": t.peers,
+                "pubdate": t.pubdate,
+                "imdbid": t.imdbid,
+                "downloadvolumefactor": t.downloadvolumefactor,
+                "uploadvolumefactor": t.uploadvolumefactor,
+                "site_name": t.site_name,
+                "grabs": t.grabs,
+            }
+            for t in results
+        ]
+
     def get_api(self) -> List[Dict[str, Any]]:
         """
         Get plugin API endpoints.
@@ -1375,7 +1454,7 @@ class ProwlarrIndexer(_PluginBase):
         Returns:
             List of API endpoint definitions
         """
-        # 提供 API 端点返回索引器列表
+        # 提供 API 端点返回索引器列表和搜索功能
         return [
             {
                 "path": "/indexers",
@@ -1383,5 +1462,271 @@ class ProwlarrIndexer(_PluginBase):
                 "methods": ["GET"],
                 "summary": "获取索引器列表",
                 "description": "返回所有已注册的 Prowlarr 索引器"
+            },
+            {
+                "path": "/search",
+                "endpoint": self.api_search,
+                "methods": ["GET"],
+                "summary": "搜索种子资源",
+                "description": "通过Prowlarr搜索种子资源。参数：keyword(必填), indexer_id(可选), mtype(可选: movie/tv), page(可选，默认0)"
             }
         ]
+
+    def get_command(self) -> List[Dict[str, Any]]:
+        """
+        注册插件远程命令
+
+        Returns:
+            命令列表
+        """
+        return [
+            {
+                "cmd": "/prowlarr_search",
+                "event": EventType.PluginAction,
+                "desc": "Prowlarr搜索",
+                "category": "索引器",
+                "data": {
+                    "action": "prowlarr_search"
+                }
+            },
+            {
+                "cmd": "/prowlarr_sites",
+                "event": EventType.PluginAction,
+                "desc": "Prowlarr站点列表",
+                "category": "索引器",
+                "data": {
+                    "action": "prowlarr_sites"
+                }
+            }
+        ]
+
+    @eventmanager.register(EventType.PluginAction)
+    def command_action(self, event: Event):
+        """
+        远程命令响应
+
+        支持的命令：
+        1. /prowlarr_search 关键词 [分类] [索引器ID]
+        2. /prowlarr_sites - 列出所有索引站点
+
+        示例：
+        /prowlarr_search The Matrix
+        /prowlarr_search The Matrix movie
+        /prowlarr_search The Matrix movie 12
+        /prowlarr_search tt0133093
+        /prowlarr_sites
+        """
+        if not self._enabled:
+            return
+
+        event_data = event.event_data
+        if not event_data:
+            return
+
+        action = event_data.get("action")
+        if not action:
+            return
+
+        # 获取用户信息
+        channel = event_data.get("channel")
+        source = event_data.get("source")
+        user = event_data.get("user")
+
+        # 处理站点列表命令
+        if action == "prowlarr_sites":
+            self._handle_sites_command(channel, source, user)
+            return
+
+        # 处理搜索命令
+        if action != "prowlarr_search":
+            return
+
+        # 获取命令文本
+        args = event_data.get("args", "")
+        if not args:
+            self.post_message(
+                channel=channel,
+                title="❌ Prowlarr搜索失败",
+                text="请提供搜索关键词\n\n"
+                     "用法：/prowlarr_search 关键词 [分类] [索引器ID]\n"
+                     "分类：movie 或 tv\n"
+                     "示例：/prowlarr_search The Matrix movie 12",
+                userid=user
+            )
+            return
+
+        # 解析参数
+        parts = args.strip().split()
+        if len(parts) < 1:
+            self.post_message(
+                channel=channel,
+                title="❌ Prowlarr搜索失败",
+                text="请提供搜索关键词",
+                userid=user
+            )
+            return
+
+        keyword = parts[0]
+        mtype = None
+        indexer_id = None
+
+        # 解析可选参数
+        if len(parts) > 1:
+            if parts[1].lower() in ["movie", "tv"]:
+                mtype = parts[1].lower()
+                if len(parts) > 2 and parts[2].isdigit():
+                    indexer_id = int(parts[2])
+            elif parts[1].isdigit():
+                indexer_id = int(parts[1])
+
+        # 转换媒体类型
+        media_type = None
+        if mtype:
+            media_type = MediaType.MOVIE if mtype == "movie" else MediaType.TV
+
+        # 发送搜索开始提示
+        search_info = f"关键词：{keyword}"
+        if mtype:
+            search_info += f"\n分类：{mtype}"
+        if indexer_id:
+            search_info += f"\n索引器ID：{indexer_id}"
+
+        self.post_message(
+            channel=channel,
+            title="🔍 Prowlarr搜索中...",
+            text=search_info,
+            userid=user
+        )
+
+        try:
+            # 执行搜索
+            results = self.api_search(keyword=keyword, indexer_id=indexer_id, mtype=mtype, page=0)
+
+            if not results:
+                self.post_message(
+                    channel=channel,
+                    title="📭 未找到结果",
+                    text=f"关键词：{keyword}\n未搜索到任何种子",
+                    userid=user
+                )
+                return
+
+            # 格式化结果（限制显示前10条）
+            max_display = 10
+            result_text = f"找到 {len(results)} 条结果，显示前 {min(len(results), max_display)} 条：\n\n"
+
+            for idx, torrent in enumerate(results[:max_display], 1):
+                # 格式化大小
+                size_gb = torrent['size'] / (1024**3) if torrent['size'] > 0 else 0
+
+                # 促销标志
+                promo = []
+                if torrent['downloadvolumefactor'] == 0.0:
+                    promo.append("🆓")
+                elif torrent['downloadvolumefactor'] == 0.5:
+                    promo.append("50%")
+                if torrent['uploadvolumefactor'] == 2.0:
+                    promo.append("2xUp")
+                promo_str = " ".join(promo) if promo else ""
+
+                result_text += (
+                    f"{idx}. {torrent['title']}\n"
+                    f"   大小: {size_gb:.2f}GB | "
+                    f"做种: {torrent['seeders']} | "
+                    f"下载: {torrent['peers']}\n"
+                    f"   站点: {torrent['site_name']}"
+                )
+
+                # 显示完成数
+                if torrent.get('grabs'):
+                    result_text += f" | 完成: {torrent['grabs']}"
+
+                result_text += "\n"
+
+                if promo_str:
+                    result_text += f"   促销: {promo_str}\n"
+
+                result_text += "\n"
+
+            self.post_message(
+                channel=channel,
+                title="✅ Prowlarr搜索完成",
+                text=result_text.strip(),
+                userid=user
+            )
+
+        except Exception as e:
+            logger.error(f"【{self.plugin_name}】远程搜索失败：{str(e)}\n{traceback.format_exc()}")
+            self.post_message(
+                channel=channel,
+                title="❌ Prowlarr搜索失败",
+                text=f"搜索过程中发生错误：{str(e)}",
+                userid=user
+            )
+
+    def _handle_sites_command(self, channel, source, user):
+        """
+        处理站点列表命令
+
+        Args:
+            channel: 消息渠道
+            source: 消息来源
+            user: 用户ID
+        """
+        try:
+            if not self._indexers:
+                self.post_message(
+                    channel=channel,
+                    title="📋 Prowlarr站点列表",
+                    text="当前没有已注册的索引器\n请先配置并启用插件",
+                    userid=user
+                )
+                return
+
+            # 统计信息
+            total = len(self._indexers)
+            private_count = sum(1 for idx in self._indexers if idx.get("privacy") == "private")
+            semi_private_count = sum(1 for idx in self._indexers if idx.get("privacy") == "semiPrivate")
+
+            # 构建站点列表
+            sites_text = f"共 {total} 个索引器（私有:{private_count} | 半私有:{semi_private_count}）\n\n"
+
+            for idx, indexer in enumerate(self._indexers, 1):
+                # 隐私类型标识
+                privacy = indexer.get("privacy", "private")
+                if privacy == "private":
+                    privacy_icon = "🔒"
+                elif privacy == "semiPrivate":
+                    privacy_icon = "🔓"
+                else:
+                    privacy_icon = "🌐"
+
+                # 站点名称（去掉插件前缀）
+                site_name = indexer.get("name", "Unknown")
+                if site_name.startswith(f"{self.plugin_name}-"):
+                    site_name = site_name[len(f"{self.plugin_name}-"):]
+
+                sites_text += f"{idx}. {privacy_icon} {site_name}\n"
+
+            self.post_message(
+                channel=channel,
+                title="📋 Prowlarr站点列表",
+                text=sites_text.strip(),
+                userid=user
+            )
+
+        except Exception as e:
+            logger.error(f"【{self.plugin_name}】获取站点列表失败：{str(e)}\n{traceback.format_exc()}")
+            self.post_message(
+                channel=channel,
+                title="❌ 获取站点列表失败",
+                text=f"发生错误：{str(e)}",
+                userid=user
+            )
+
+    def get_agent_tools(self) -> List[Type]:
+        """
+        获取插件智能体工具
+        返回工具类列表，每个工具类必须继承自 MoviePilotTool
+        """
+        return [SearchTorrentsTool, ListIndexersTool]

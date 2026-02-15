@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)
 ![MoviePilot](https://img.shields.io/badge/MoviePilot-v2.x-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
@@ -28,7 +28,7 @@
 - **Prowlarr索引器**: 集成 Prowlarr 的所有已配置索引器
 - **Jackett索引器**: 集成 Jackett 的所有已配置索引器
 
-通过这些插件，您可以在 MoviePilot 中统一管理和搜索来自 Prowlarr/Jackett 的所有索引站点，无需手动逐个添加站点。
+通过这些插件，您可以在 MoviePilot 中统一管理和搜索来自 Prowlarr/Jackett 的所有索引站点，拓展MoviePilot的站点搜索支持。
 
 ## ✨ 功能特性
 
@@ -41,12 +41,14 @@
 - ✅ **促销识别** - 自动识别免费、半价、双倍上传等促销
 - ✅ **定时同步** - 支持 Cron 表达式定时同步索引器列表
 - ✅ **代理支持** - 支持使用系统代理访问服务
-- ✅ **友好错误提示** - 智能解析并显示搜索失败原因（v1.4.0+）
+- ✅ **API接口** - 提供HTTP API支持外部调用搜索功能（v1.5.0+）
+- ✅ **远程命令** - 支持通过消息渠道远程搜索（v1.5.0+）
+- ✅ **AI智能体工具** - 支持通过AI智能体自然语言搜索（v1.5.0+）
 
 ### 智能过滤
 
 - **站点类型过滤**: 只索引私有和半公开站点，自动过滤公开站点
-- **XXX内容过滤**: 自动屏蔽仅包含成人内容的索引器
+- **XXX内容过滤**: 自动屏蔽仅包含成人内容的索引器（配合官方要求）
 - **英文关键词优化**: 自动过滤非英文搜索关键词（Prowlarr/Jackett 对中文支持有限）
 
 ### 分类支持 (v1.1.0)
@@ -56,7 +58,7 @@
 
 **Torznab 分类映射**:
 - `2000` 系列 → 电影分类
-- `5000` 系列 → 电影分类
+- `5000` 系列 → 电视分类
 
 ## 🚀 快速开始
 

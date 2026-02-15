@@ -2,7 +2,7 @@ API DOCUMENTS
 =============
 
 Prowlarr/Jackett Indexer Plugins for MoviePilot
-Version: 1.4.0
+Version: 1.5.0
 Last Updated: 2026-02-15
 
 ========================================
@@ -13,19 +13,25 @@ TABLE OF CONTENTS
 2. Plugin Methods
    2.1 ProwlarrIndexer Methods
    2.2 JackettIndexer Methods
-3. API Endpoints
-   3.1 Get Indexers List
-4. Data Structures
-   4.1 Indexer Dictionary
-   4.2 TorrentInfo Object
-   4.3 Category Structure
-5. Internal Methods
-   5.1 Search Methods
-   5.2 Sync Methods
-   5.3 Filter Methods
-   5.4 Category Methods
-6. Error Handling
-7. Examples
+3. Remote Commands
+   3.1 Prowlarr Search Command
+   3.2 Prowlarr Sites Command
+   3.3 Jackett Search Command
+   3.4 Jackett Sites Command
+4. API Endpoints
+   4.1 Get Indexers List
+   4.2 Search Torrents
+5. Data Structures
+   5.1 Indexer Dictionary
+   5.2 TorrentInfo Object
+   5.3 Category Structure
+6. Internal Methods
+   6.1 Search Methods
+   6.2 Sync Methods
+   6.3 Filter Methods
+   6.4 Category Methods
+7. Error Handling
+8. Examples
 
 ========================================
 1. OVERVIEW
@@ -79,6 +85,47 @@ get_api()
     Description: Get plugin API endpoints
     Returns: List of API endpoint definitions
 
+get_command()
+    Description: Register plugin remote commands
+    Returns: List of command definitions
+    Format:
+        [{
+            "cmd": "/prowlarr_search",
+            "event": EventType.PluginAction,
+            "desc": "Prowlarr搜索",
+            "category": "索引器",
+            "data": {"action": "prowlarr_search"}
+        },
+        {
+            "cmd": "/prowlarr_sites",
+            "event": EventType.PluginAction,
+            "desc": "Prowlarr站点列表",
+            "category": "索引器",
+            "data": {"action": "prowlarr_sites"}
+        }]
+
+command_action(event)
+    Description: Handle remote command execution
+    Parameters:
+        event (Event): Plugin action event
+    Event Handler: @eventmanager.register(EventType.PluginAction)
+    Supported Commands:
+        /prowlarr_search keyword [mtype] [indexer_id]
+        /prowlarr_sites
+    Examples:
+        /prowlarr_search The Matrix
+        /prowlarr_search The Matrix movie
+        /prowlarr_search The Matrix movie 12
+        /prowlarr_search tt0133093
+        /prowlarr_sites
+
+get_agent_tools()
+    Description: Register AI agent tools
+    Returns: List of tool classes (MoviePilotTool subclasses)
+    Tools:
+        - SearchTorrentsTool: Search torrents via AI
+        - ListIndexersTool: List indexers via AI
+
 
 2.2 JACKETTINDEXER METHODS
 ---------------------------
@@ -101,20 +148,180 @@ get_indexers()
 get_api()
     Same as ProwlarrIndexer
 
+get_command()
+    Description: Register plugin remote commands
+    Returns: List of command definitions
+    Commands: /jackett_search, /jackett_sites
+
+command_action(event)
+    Description: Handle remote command execution
+    Supported Commands:
+        /jackett_search keyword [mtype] [indexer_name]
+        /jackett_sites
+    Examples:
+        /jackett_search The Matrix
+        /jackett_search The Matrix movie
+        /jackett_search The Matrix movie iptorrents
+        /jackett_search tt0133093
+        /jackett_sites
+
+get_agent_tools()
+    Description: Register AI agent tools
+    Returns: List of tool classes (MoviePilotTool subclasses)
+    Tools:
+        - SearchTorrentsTool: Search torrents via AI
+        - ListIndexersTool: List indexers via AI
+
 
 ========================================
-3. API ENDPOINTS
+3. REMOTE COMMANDS
 ========================================
 
-3.1 GET INDEXERS LIST
+Both plugins support remote commands via messaging channels (Telegram, WeChat, etc.)
+All commands are registered in the "索引器" category.
+
+3.1 PROWLARR SEARCH COMMAND
+----------------------------
+
+Command: /prowlarr_search
+Category: 索引器
+Description: Search torrents through Prowlarr via messaging channels
+
+Format:
+    /prowlarr_search keyword [mtype] [indexer_id]
+
+Parameters:
+    keyword (required): Search keyword or IMDb ID
+        - Regular keyword: "The Matrix", "Breaking Bad"
+        - IMDb ID: "tt0133093"
+
+    mtype (optional): Media type
+        - Values: "movie" or "tv"
+
+    indexer_id (optional): Prowlarr indexer ID
+        - Numeric ID from Prowlarr
+        - Example: 12, 15, 23
+
+Examples:
+    /prowlarr_search The Matrix
+    /prowlarr_search The Matrix movie
+    /prowlarr_search The Matrix movie 12
+    /prowlarr_search tt0133093
+
+Response:
+    Plugin sends formatted message with search results:
+    - Shows up to 10 results
+    - Displays title, size, seeders, peers
+    - Shows promotion flags (freeleech, etc.)
+    - Indicates site name
+
+
+3.2 PROWLARR SITES COMMAND
+---------------------------
+
+Command: /prowlarr_sites
+Category: 索引器
+Description: List all registered Prowlarr indexers
+
+Format:
+    /prowlarr_sites
+
+Response:
+    Plugin sends formatted message with indexer list:
+    - Total count and statistics (private/semi-private)
+    - Numbered list with privacy icons and indexer names
+
+Example Output:
+    📋 Prowlarr站点列表
+
+    共 15 个索引器（私有:12 | 半私有:3）
+
+    1. 🔒 M-Team - TP
+    2. 🔒 FileList
+    3. 🔓 BeyondHD
+    4. 🔒 IPTorrents
+    5. 🔒 TorrentLeech
+    ...
+
+
+3.3 JACKETT SEARCH COMMAND
+---------------------------
+
+Command: /jackett_search
+Category: 索引器
+Description: Search torrents through Jackett via messaging channels
+
+Format:
+    /jackett_search keyword [mtype] [indexer_name]
+
+Parameters:
+    keyword (required): Search keyword or IMDb ID
+        - Regular keyword: "The Matrix", "Breaking Bad"
+        - IMDb ID: "tt0133093"
+
+    mtype (optional): Media type
+        - Values: "movie" or "tv"
+
+    indexer_name (optional): Jackett indexer name
+        - String identifier from Jackett
+        - Example: "iptorrents", "mteamtp"
+
+Examples:
+    /jackett_search The Matrix
+    /jackett_search The Matrix movie
+    /jackett_search The Matrix movie iptorrents
+    /jackett_search tt0133093
+
+Response:
+    Plugin sends formatted message with search results:
+    - Shows up to 10 results
+    - Displays title, size, seeders, peers
+    - Shows promotion flags (freeleech, etc.)
+    - Shows download count (grabs)
+    - Indicates site name
+
+
+3.4 JACKETT SITES COMMAND
+--------------------------
+
+Command: /jackett_sites
+Category: 索引器
+Description: List all registered Jackett indexers
+
+Format:
+    /jackett_sites
+
+Response:
+    Plugin sends formatted message with indexer list:
+    - Total count and statistics (private/semi-private)
+    - Numbered list with privacy icons and indexer names
+
+Example Output:
+    📋 Jackett站点列表
+
+    共 18 个索引器（私有:15 | 半私有:3）
+
+    1. 🔒 IPTorrents
+    2. 🔒 TorrentLeech
+    3. 🔓 RARBG
+    4. 🌐 The Pirate Bay
+    5. 🔒 1337x
+    ...
+
+
+========================================
+4. API ENDPOINTS
+========================================
+
+4.1 GET INDEXERS LIST
 ----------------------
 
-Endpoint: /api/plugins/{plugin_name}/indexers
+Endpoint: /plugin/{PluginName}/indexers
 Method: GET
-Authentication: Required (MoviePilot token)
+Authentication: Optional (Recommended with MoviePilot API_TOKEN)
 
 Path Parameters:
-    plugin_name: "prowlarrindexer" or "jackettindexer"
+    PluginName: "ProwlarrIndexer" or "JackettIndexer"
 
 Response Format:
     Content-Type: application/json
@@ -122,8 +329,8 @@ Response Format:
     Body: Array of indexer dictionaries
 
 Example Request:
-    GET /api/plugins/prowlarrindexer/indexers
-    Authorization: Bearer {token}
+    GET /plugin/ProwlarrIndexer/indexers
+    Authorization: Bearer {API_TOKEN}
 
 Example Response:
     [
@@ -152,11 +359,128 @@ Error Responses:
     500 Internal Server Error - Plugin error
 
 
+4.2 SEARCH TORRENTS
+--------------------
+
+Endpoint: /plugin/{PluginName}/search
+Method: GET
+Authentication: Optional (Recommended with MoviePilot API_TOKEN)
+
+Path Parameters:
+    PluginName: "ProwlarrIndexer" or "JackettIndexer"
+
+Query Parameters:
+    keyword (string, required): Search keyword or IMDb ID
+        - Regular keyword: "The Matrix", "Breaking Bad"
+        - IMDb ID format: "tt0133093", "tt0903747"
+        - English keywords recommended (better results)
+
+    indexer_id (integer, optional): ProwlarrIndexer specific
+        - Prowlarr indexer ID to search
+        - If not specified, searches all indexers
+        - Example: 12, 15, 23
+
+    indexer_name (string, optional): JackettIndexer specific
+        - Jackett indexer name to search
+        - If not specified, searches all indexers
+        - Example: "iptorrents", "mteamtp"
+
+    mtype (string, optional): Media type filter
+        - Values: "movie" or "tv"
+        - If not specified, searches both types
+
+    page (integer, optional): Page number for pagination
+        - Default: 0
+        - Each page returns up to 100 results
+
+Response Format:
+    Content-Type: application/json
+    Status: 200 OK
+    Body: Array of torrent dictionaries
+
+ProwlarrIndexer Example Request:
+    GET /plugin/ProwlarrIndexer/search?keyword=The%20Matrix&mtype=movie
+    GET /plugin/ProwlarrIndexer/search?keyword=tt0133093&indexer_id=12
+    Authorization: Bearer {API_TOKEN}
+
+JackettIndexer Example Request:
+    GET /plugin/JackettIndexer/search?keyword=Breaking%20Bad&mtype=tv&page=0
+    GET /plugin/JackettIndexer/search?keyword=tt0903747&indexer_name=iptorrents
+    Authorization: Bearer {API_TOKEN}
+
+Example Response:
+    [
+      {
+        "title": "The Matrix 1999 1080p BluRay x264",
+        "description": "The Matrix",
+        "enclosure": "https://example.com/download/123.torrent",
+        "page_url": "https://example.com/details/123",
+        "size": 8589934592,
+        "seeders": 150,
+        "peers": 5,
+        "pubdate": "2024-01-15 12:30:00",
+        "imdbid": "tt0133093",
+        "downloadvolumefactor": 0.0,
+        "uploadvolumefactor": 2.0,
+        "site_name": "Prowlarr索引器-M-Team"
+      },
+      {
+        "title": "The Matrix Reloaded 2003 1080p BluRay",
+        "description": "The Matrix Reloaded",
+        "enclosure": "magnet:?xt=urn:btih:...",
+        "page_url": "https://example.com/details/456",
+        "size": 9663676416,
+        "seeders": 120,
+        "peers": 8,
+        "pubdate": "2024-01-16 18:45:00",
+        "imdbid": "tt0234215",
+        "downloadvolumefactor": 0.5,
+        "uploadvolumefactor": 1.0,
+        "site_name": "Prowlarr索引器-FileList"
+      }
+    ]
+
+Response Fields:
+    title (string): Torrent title/release name
+    description (string): Torrent description or sort title
+    enclosure (string): Download URL or magnet link
+    page_url (string): Details page URL
+    size (integer): File size in bytes
+    seeders (integer): Number of seeders
+    peers (integer): Number of leechers/peers
+    pubdate (string): Publication date (YYYY-MM-DD HH:MM:SS)
+    imdbid (string): IMDb ID with "tt" prefix (if available)
+    downloadvolumefactor (float): Download multiplier
+        - 0.0: Freeleech (free download)
+        - 0.5: Half leech (50% discount)
+        - 1.0: Normal
+    uploadvolumefactor (float): Upload multiplier
+        - 1.0: Normal
+        - 2.0: Double upload
+    site_name (string): Indexer name
+    grabs (integer): Download count (JackettIndexer only)
+
+Error Responses:
+    400 Bad Request - Missing required parameter (keyword)
+    401 Unauthorized - Invalid API token
+    404 Not Found - Plugin not enabled or indexer not found
+    500 Internal Server Error - Search failed
+
+Usage Notes:
+    - IMDb ID searches are more accurate than keyword searches
+    - English keywords work better than non-English keywords
+    - Keyword filtering is automatic (non-English keywords are skipped)
+    - Results are limited to 100 per page
+    - Use pagination for large result sets
+    - Some indexers may return empty results (check Prowlarr/Jackett logs)
+    - Promotion flags (freeleech, etc.) are automatically detected
+
+
 ========================================
-4. DATA STRUCTURES
+5. DATA STRUCTURES
 ========================================
 
-4.1 INDEXER DICTIONARY
+5.1 INDEXER DICTIONARY
 -----------------------
 
 Format:
@@ -218,7 +542,7 @@ category (object, optional)
     See section 4.3
 
 
-4.2 TORRENTINFO OBJECT
+5.2 TORRENTINFO OBJECT
 -----------------------
 
 Format:
@@ -286,7 +610,7 @@ uploadvolumefactor (float)
     2.0: Double upload
 
 
-4.3 CATEGORY STRUCTURE
+5.3 CATEGORY STRUCTURE
 -----------------------
 
 Format:
@@ -360,7 +684,7 @@ Torznab Category Mapping:
 
 
 ========================================
-5. INTERNAL METHODS
+6. INTERNAL METHODS
 ========================================
 
 5.1 SEARCH METHODS
@@ -416,7 +740,7 @@ _get_categories(mtype)
         TV: [5000]
 
 
-5.2 SYNC METHODS
+6.2 SYNC METHODS
 -----------------
 
 _fetch_and_build_indexers()
@@ -448,7 +772,7 @@ _build_indexer_dict(indexer)
     Note: v1.2.0+ returns tuple to optimize XXX filtering
 
 
-5.3 FILTER METHODS
+6.3 FILTER METHODS
 -------------------
 
 _is_imdb_id(keyword)
@@ -476,7 +800,7 @@ _is_english_keyword(keyword)
     Access: Private
 
 
-5.4 CATEGORY METHODS
+6.4 CATEGORY METHODS
 ---------------------
 
 _get_indexer_categories(indexer_name)
@@ -500,10 +824,10 @@ Jackett Implementation:
 
 
 ========================================
-6. ERROR HANDLING
+7. ERROR HANDLING
 ========================================
 
-6.1 RETURN VALUES
+7.1 RETURN VALUES
 ------------------
 
 Methods return empty/safe values on error:
@@ -511,7 +835,7 @@ Methods return empty/safe values on error:
     - get_indexers: [] (empty list)
     - test_connection: (False, "error message")
 
-6.2 LOGGING
+7.2 LOGGING
 ------------
 
 Log Levels:
@@ -534,7 +858,7 @@ Log Levels:
         - Unexpected exceptions
         - Stack traces
 
-6.3 EXCEPTION HANDLING
+7.3 EXCEPTION HANDLING
 -----------------------
 
 All public methods have try-except blocks:
@@ -545,10 +869,10 @@ All public methods have try-except blocks:
 
 
 ========================================
-7. EXAMPLES
+8. EXAMPLES
 ========================================
 
-7.1 SEARCH EXAMPLE (Keyword)
+8.1 SEARCH EXAMPLE (Keyword)
 -----------------------------
 
 Input:
@@ -577,7 +901,7 @@ Process:
     9. Return list
 
 
-7.1.1 SEARCH EXAMPLE (IMDb ID)
+8.1.1 SEARCH EXAMPLE (IMDb ID)
 -------------------------------
 
 Input:
@@ -626,7 +950,7 @@ Output:
     ]
 
 
-7.2 API CALL EXAMPLE
+8.2 API CALL EXAMPLE
 ---------------------
 
 Request:
@@ -676,7 +1000,7 @@ Response:
     ]
 
 
-7.3 CATEGORY CONVERSION EXAMPLE
+8.3 CATEGORY CONVERSION EXAMPLE
 ---------------------------------
 
 Prowlarr API Response:
@@ -719,11 +1043,28 @@ For more information, see:
 - Source code: plugins.v2/jackettindexer/__init__.py
 
 Last updated: 2026-02-15
-Version: 1.4.0
+Version: 1.5.0
 
 ========================================
 CHANGELOG
 ========================================
+
+v1.5.0 (2026-02-15)
+-------------------
+- Added public search API endpoint (/search)
+- Support external search via HTTP API
+- Support indexer-specific search (by ID or name)
+- Support IMDb ID and keyword searches via API
+- Support media type filtering and pagination
+- Return standardized torrent metadata (title, size, seeders, promotion, etc.)
+- Added remote command support (/prowlarr_search, /jackett_search)
+- Support remote search via messaging channels (Telegram, WeChat, etc.)
+- Display up to 10 search results with formatted output
+- Added indexer list command (/prowlarr_sites, /jackett_sites)
+- Display all registered indexers with statistics and details
+- Added AI agent tools support (prowlarr_search_torrents, jackett_search_torrents)
+- Added AI agent indexer listing tools (prowlarr_list_indexers, jackett_list_indexers)
+- Support natural language torrent search via AI agent
 
 v1.4.0 (2026-02-15)
 -------------------
