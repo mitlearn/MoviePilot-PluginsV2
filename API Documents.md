@@ -2,7 +2,7 @@ API DOCUMENTS
 =============
 
 Prowlarr/Jackett Indexer Plugins for MoviePilot
-Version: 1.2.0
+Version: 1.3.0
 Last Updated: 2026-02-15
 
 ========================================
@@ -719,11 +719,19 @@ For more information, see:
 - Source code: plugins.v2/jackettindexer/__init__.py
 
 Last updated: 2026-02-15
-Version: 1.2.0
+Version: 1.3.0
 
 ========================================
 CHANGELOG
 ========================================
+
+v1.3.0 (2026-02-15)
+-------------------
+- Fixed XXX filtering logic: Only filter pure adult sites, keep Music/Audio/etc sites
+- Enhanced API request logging: Show full URLs for all requests (indexer list, search, etc)
+- Verified field types based on real API data (Prowlarr privacy=string, Jackett type=string)
+- Improved debug logging: Show indexer ID and full request URL when searching
+- Fixed over-aggressive filtering that removed music indexers (DICMusic, OpenCD, etc)
 
 v1.2.0 (2026-02-15)
 -------------------

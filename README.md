@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)
 ![MoviePilot](https://img.shields.io/badge/MoviePilot-v2.x-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
@@ -21,7 +21,7 @@
 ## 📖 简介
 
 > [!IMPORTANT]
-> 本项目由 AI Coding 而成。如遇问题，请在 Issues 中详细描述问题现象、错误日志及复现步骤。AI 能理解的问题就能修复，否则请自行动手或提交 PR，我们欢迎所有贡献！
+> 本项目由 AI Coding 而成。如遇问题，请在 Issues 中详细描述问题现象、错误日志及复现步骤。AI 能理解的问题就能修复，否则请自行动手并提交 PR，我们欢迎所有贡献！
 
 本项目提供两个 MoviePilot 插件，用于集成 Prowlarr 和 Jackett 索引器服务：
 
@@ -56,7 +56,6 @@
 **Torznab 分类映射**:
 - `2000` 系列 → 电影分类
 - `5000` 系列 → 电视分类
-- `6000` 系列 → 自动过滤（成人内容）
 
 ## 🚀 快速开始
 
@@ -235,20 +234,6 @@
 <details>
 <summary><b>Q: 搜索时提示"搜索出错：'NoneType' object has no attribute 'get'"？</b></summary>
 
-**问题现象**:
-```
-【ERROR】Prowlarr索引器-M-Team - TP 搜索出错：'NoneType' object has no attribute 'get'
-```
-
-**原因**: MoviePilot 传递给插件的参数异常，或插件版本过旧。
-
-**解决方案**:
-1. **升级到最新版本**（v1.2.0+）- 已修复该问题
-2. 重新同步索引器：启用插件的"立即运行一次"选项
-3. 如果问题仍存在，检查 MoviePilot 日志中是否有其他相关错误
-4. 尝试禁用→保存→启用→保存插件来重置状态
-</details>
-
 <details>
 <summary><b>Q: 为什么搜索中文关键词没有结果？</b></summary>
 
@@ -372,7 +357,5 @@ grep "过滤" logs/moviepilot.log
 **⭐ 如果这个项目对你有帮助，请给一个 Star！**
 
 Made with ❤️ by Claude
-
-**版本**: v1.2.0 | **更新日期**: 2026-02-15
 
 </div>

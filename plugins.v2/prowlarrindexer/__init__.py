@@ -41,7 +41,7 @@ class ProwlarrIndexer(_PluginBase):
     plugin_name = "Prowlarr索引器"
     plugin_desc = "集成Prowlarr索引器搜索，支持多站点统一搜索。仅索引私有和半公开站点。"
     plugin_icon = "Prowlarr.png"
-    plugin_version = "1.2.0"
+    plugin_version = "1.3.0"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "prowlarrindexer_"
@@ -235,7 +235,7 @@ class ProwlarrIndexer(_PluginBase):
                 "Accept": "application/json"
             }
 
-            logger.debug(f"【{self.plugin_name}】正在获取索引器列表：{url}")
+            logger.debug(f"【{self.plugin_name}】正在获取索引器列表：{url} (Headers: X-Api-Key=***)")
 
             response = RequestUtils(
                 headers=headers,
@@ -363,15 +363,22 @@ class ProwlarrIndexer(_PluginBase):
                 except (ValueError, TypeError):
                     continue
 
-            # Check if ONLY 6000 (XXX) category exists
-            is_xxx_only = (top_level_categories == {6000})
+            # Check if indexer is XXX-only (has 6000 but no other useful categories)
+            # Only filter pure XXX sites, keep Music/Audio/etc sites
+            has_xxx = 6000 in top_level_categories
+            has_other_content = any(cat in top_level_categories for cat in [2000, 5000, 3000, 4000, 1000, 7000, 8000])
+
+            is_xxx_only = has_xxx and not has_other_content
 
             if is_xxx_only:
-                logger.debug(f"【{self.plugin_name}】索引器 {indexer_id} 仅包含XXX分类：{top_level_categories}")
+                logger.debug(f"【{self.plugin_name}】索引器 {indexer_id} 仅包含XXX分类，顶层分类：{sorted(top_level_categories)}")
                 return None, True
 
-            # Return None if no movie/tv categories found
+            # If indexer has no movie/tv categories, still allow it (might be Music, Audio, etc.)
+            # Just don't add movie/tv category info
             if not category_map["movie"] and not category_map["tv"]:
+                logger.debug(f"【{self.plugin_name}】索引器 {indexer_id} 无电影/电视分类（可能是音乐/其他类型站点），顶层分类：{sorted(top_level_categories)}")
+                # Return None for category but False for is_xxx_only (allow the indexer)
                 return None, False
 
             # Remove empty categories
@@ -722,6 +729,8 @@ class ProwlarrIndexer(_PluginBase):
                 page=page
             )
 
+            logger.debug(f"【{self.plugin_name}】开始搜索站点：{site_name}，关键词：{keyword}，索引器ID：{indexer_id}")
+
             # Execute search API call
             api_results = self._search_prowlarr_api(search_params)
 
@@ -845,7 +854,7 @@ class ProwlarrIndexer(_PluginBase):
                 "Accept": "application/json"
             }
 
-            logger.info(f"【{self.plugin_name}】API请求：{url}")
+            logger.debug(f"【{self.plugin_name}】正在搜索 Prowlarr API: {url}")
             logger.debug(f"【{self.plugin_name}】搜索参数：{params}")
 
             response = RequestUtils(
