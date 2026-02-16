@@ -66,7 +66,35 @@ TraktSync 是为 MoviePilot 开发的 Trakt.tv 想看列表同步插件。它可
 
 ### 第二步：获取 Refresh Token
 
-#### 方法一：使用浏览器获取（推荐）
+#### 方法一：使用插件自动生成的授权链接（最简单，推荐）
+
+1. 在插件配置中填写第一步获取的 **Client ID** 和 **Client Secret**
+
+2. **保存配置**后，查看 MoviePilot 日志（设置 → 系统 → 实时日志）
+
+3. 日志中会自动输出授权链接，类似：
+   ```log
+   ================================================================================
+   请访问以下链接进行授权:
+   https://trakt.tv/oauth/authorize?response_type=code&client_id=YOUR_CLIENT_ID&redirect_uri=urn:ietf:wg:oauth:2.0:oob
+   授权后，将获得的授权码填入配置页面的【授权码】字段，然后保存配置
+   ================================================================================
+   ```
+
+4. 复制日志中的授权链接，在浏览器中访问
+
+5. 授权后会显示一个 **Authorization Code**（类似：`abc123def456...`），复制这个代码
+
+6. 返回插件配置页面，将授权码填入 **【授权码】** 字段
+
+7. **保存配置**，插件会自动获取并保存 Refresh Token
+
+8. 日志中会显示 `Token获取成功！`，此时授权完成
+
+> [!TIP]
+> 这是最简单的方法，插件会自动处理 Token 获取流程，无需手动执行命令或脚本。
+
+#### 方法二：使用浏览器手动获取
 
 1. 将以下 URL 中的 `YOUR_CLIENT_ID` 替换为你的 Client ID，然后在浏览器中访问：
    ```
@@ -90,7 +118,7 @@ TraktSync 是为 MoviePilot 开发的 Trakt.tv 想看列表同步插件。它可
 
 4. 响应中的 `refresh_token` 字段就是你需要的 Refresh Token
 
-#### 方法二：使用 Python 脚本获取
+#### 方法三：使用 Python 脚本获取
 
 创建文件 `get_trakt_token.py`:
 
@@ -214,11 +242,16 @@ python get_trakt_token.py
 
 ### `/trakt_download`
 
-**功能**: 同步 Trakt想看列表
+**功能**: 同步并下载 Trakt想看列表（强制启用订阅）
 
 **行为**:
 - 同步 Watchlist 和自定义列表
-- 根据"添加启用的订阅"配置决定订阅状态
+- **强制添加启用的订阅（state=N），无视"添加启用的订阅"配置**
+- 所有新增订阅都会立即触发搜索下载
+
+**使用场景**:
+- 临时想要立即下载某些媒体，无论配置如何设置
+- 即使"添加启用的订阅"关闭，也能强制启用订阅
 
 **示例**:
 ```
@@ -249,8 +282,8 @@ python get_trakt_token.py
 | 动作名称 | 功能 | 说明 |
 |---------|------|------|
 | **同步Trakt想看** | 同步 Watchlist 和自定义列表 | 根据"添加启用的订阅"配置决定订阅状态 |
-| **同步并下载Trakt想看** | 同步 Watchlist 和自定义列表 | 根据"添加启用的订阅"配置决定订阅状态 |
-| **同步Trakt自定义列表** | 仅同步自定义列表 | 不同步 Watchlist |
+| **同步并下载Trakt想看** | 同步 Watchlist 和自定义列表 | **强制启用订阅（无视配置），立即触发搜索下载** |
+| **同步Trakt自定义列表** | 仅同步自定义列表 | 根据"添加启用的订阅"配置决定订阅状态 |
 
 ### 使用示例
 
@@ -267,21 +300,24 @@ python get_trakt_token.py
 插件还提供了 HTTP API 端点，可以通过 POST 请求触发：
 
 ```bash
-# 同步 Watchlist
+# 同步 Watchlist（根据配置决定订阅状态）
 curl -X POST "http://your-moviepilot/api/v1/plugin/TraktSync/sync" \
   -H "Content-Type: application/json" \
   -d '{"apikey": "your_api_key"}'
 
-# 同步并下载
+# 同步并下载（强制启用订阅，无视配置）
 curl -X POST "http://your-moviepilot/api/v1/plugin/TraktSync/sync_download" \
   -H "Content-Type: application/json" \
   -d '{"apikey": "your_api_key"}'
 
-# 同步自定义列表
+# 同步自定义列表（根据配置决定订阅状态）
 curl -X POST "http://your-moviepilot/api/v1/plugin/TraktSync/sync_custom_lists" \
   -H "Content-Type: application/json" \
   -d '{"apikey": "your_api_key"}'
 ```
+
+> [!NOTE]
+> `/sync_download` 端点会强制添加启用的订阅（state=N），无论"添加启用的订阅"配置如何设置。
 
 详细的 API 文档请参考 [API_Document.md](API_Document.md)。
 
@@ -479,6 +515,26 @@ https://trakt.tv/users/myusername/lists/sci-fi-movies
 **A**: 在插件详情页的同步历史中：
 - Watchlist 的项目类型显示为"电影"或"电视剧"
 - 自定义列表的项目类型显示为列表名称（如 "myusername/sci-fi-movies"）
+</details>
+
+<details>
+<summary><b>Q: `/trakt_sync` 和 `/trakt_download` 有什么区别？</b></summary>
+
+**A**: 两者的主要区别在于订阅状态的处理方式。
+
+| 命令 | 订阅状态 | 说明 |
+|------|---------|------|
+| `/trakt_sync` | 根据配置 | 遵循"添加启用的订阅"配置项的设置 |
+| `/trakt_download` | 强制启用 | 无视配置，强制添加启用的订阅（state=N） |
+
+**使用场景**:
+- **`/trakt_sync`**: 日常使用，按照你的配置偏好添加订阅
+- **`/trakt_download`**: 临时需要立即下载，即使配置中关闭了"添加启用的订阅"
+
+**示例**:
+- 配置中关闭了"添加启用的订阅"（只想添加订阅但不自动搜索）
+- 使用 `/trakt_sync` 会添加暂停状态的订阅（state=S）
+- 使用 `/trakt_download` 会强制添加激活状态的订阅（state=N），立即触发搜索
 </details>
 
 <details>

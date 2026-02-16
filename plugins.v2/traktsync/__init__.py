@@ -1031,6 +1031,22 @@ class TraktSync(_PluginBase):
                 )
                 return
 
+            # 同步并下载（强制启用订阅）
+            if action == "trakt_download":
+                logger.info(f"收到命令，开始执行Trakt想看同步并下载（强制启用订阅）...")
+                self.post_message(
+                    channel=event_data.get("channel"),
+                    title="开始同步并下载Trakt想看 ...",
+                    userid=event_data.get("user")
+                )
+                self.sync_download()
+                self.post_message(
+                    channel=event.event_data.get("channel"),
+                    title="同步并下载Trakt想看数据完成！",
+                    userid=event.event_data.get("user")
+                )
+                return
+
             # Watchlist同步
             logger.info(f"收到命令，开始执行Trakt想看同步 ...")
             self.post_message(
@@ -1250,6 +1266,146 @@ class TraktSync(_PluginBase):
                    f"已存在剧集 {stats['shows_exists']} 部，"
                    f"错误 {stats['errors']} 个")
 
+    def sync_download(self):
+        """
+        同步Trakt想看列表并下载（强制启用订阅，无视配置）
+        """
+        if not self._client_id or not self._client_secret or not self._refresh_token:
+            logger.error("Trakt配置不完整，请检查Client ID、Client Secret和Refresh Token")
+            return
+
+        # 刷新 access token
+        if not self.__refresh_access_token():
+            logger.error("Trakt access token刷新失败，同步终止")
+            return
+
+        logger.info("开始同步Trakt想看列表（强制启用订阅）...")
+
+        # 读取历史记录
+        history: List[dict] = self.get_data('history') or []
+
+        # 统计数据
+        stats = self.__init_sync_stats()
+
+        # 同步电影（根据 sync_type 判断是否需要同步）
+        if self._sync_type in ["all", "movie"]:
+            movies = self.__get_watchlist_movies()
+            if movies:
+                logger.info(f"获取到 {len(movies)} 部Trakt想看电影")
+                for item in movies:
+                    try:
+                        movie_data = item.get("movie", {})
+                        result = self.__sync_movie(movie_data, history, source="watchlist", force_enable=True)
+                        if result:
+                            if result.get("is_new"):
+                                stats["movies_added"] += 1
+                            else:
+                                stats["movies_exists"] += 1
+                            # 添加到历史记录
+                            history.append(result.get("history"))
+                    except Exception as e:
+                        logger.error(f"同步电影失败: {str(e)}")
+                        stats["errors"] += 1
+
+        # 同步剧集（根据 sync_type 判断是否需要同步）
+        if self._sync_type in ["all", "tv"]:
+            shows = self.__get_watchlist_shows()
+            if shows:
+                logger.info(f"获取到 {len(shows)} 部Trakt想看剧集")
+                for item in shows:
+                    try:
+                        show_data = item.get("show", {})
+                        result = self.__sync_show(show_data, history, source="watchlist", force_enable=True)
+                        if result:
+                            if result.get("is_new"):
+                                stats["shows_added"] += 1
+                            else:
+                                stats["shows_exists"] += 1
+                            # 添加到历史记录
+                            history.append(result.get("history"))
+                    except Exception as e:
+                        logger.error(f"同步剧集失败: {str(e)}")
+                        stats["errors"] += 1
+
+        # 同步自定义列表
+        if self._custom_lists:
+            logger.info("开始同步Trakt自定义列表（强制启用订阅）...")
+            list_configs = self._custom_lists.split(",")
+
+            for list_config in list_configs:
+                list_config = list_config.strip()
+                if not list_config:
+                    continue
+
+                # 解析列表配置
+                username, list_id = self.__parse_list_config(list_config)
+                if not username or not list_id:
+                    logger.error(f"无效的列表配置: {list_config}")
+                    stats["errors"] += 1
+                    continue
+
+                logger.info(f"同步自定义列表: {username}/{list_id}")
+
+                # 获取列表内容
+                items = self.__get_custom_list_items(username, list_id)
+                if not items:
+                    logger.warning(f"未获取到列表内容: {username}/{list_id}")
+                    continue
+
+                logger.info(f"获取到 {len(items)} 个列表项")
+
+                # 列表名称作为来源
+                list_source = f"{username}/{list_id}"
+
+                # 处理列表项（自定义列表全同步，不受Watchlist同步类型限制）
+                for item in items:
+                    try:
+                        item_type = item.get("type")
+
+                        if item_type == "movie":
+                            movie_data = item.get("movie", {})
+                            result = self.__sync_movie(movie_data, history, source=list_source, force_enable=True)
+                            if result:
+                                if result.get("is_new"):
+                                    stats["movies_added"] += 1
+                                else:
+                                    stats["movies_exists"] += 1
+                                history.append(result.get("history"))
+
+                        elif item_type == "show":
+                            show_data = item.get("show", {})
+                            result = self.__sync_show(show_data, history, source=list_source, force_enable=True)
+                            if result:
+                                if result.get("is_new"):
+                                    stats["shows_added"] += 1
+                                else:
+                                    stats["shows_exists"] += 1
+                                history.append(result.get("history"))
+
+                        else:
+                            logger.debug(f"跳过未知项目类型: {item_type}")
+
+                    except Exception as e:
+                        logger.error(f"同步列表项失败: {str(e)}")
+                        stats["errors"] += 1
+
+        # 更新上次同步时间
+        self._last_sync_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.__update_config()
+
+        # 保存历史记录
+        self.save_data('history', history)
+
+        # 发送通知
+        if self._notify:
+            self.__send_notification(stats)
+
+        logger.info(f"Trakt想看同步并下载完成: 新增电影 {stats['movies_added']} 部，"
+                   f"新增剧集 {stats['shows_added']} 部，"
+                   f"已存在电影 {stats['movies_exists']} 部，"
+                   f"已存在剧集 {stats['shows_exists']} 部，"
+                   f"错误 {stats['errors']} 个")
+
     def __get_token_from_code(self) -> bool:
         """
         使用授权码获取 access token 和 refresh token
@@ -1418,13 +1574,14 @@ class TraktSync(_PluginBase):
         url = f"{self._api_base}/users/{username}/lists/{list_id}/items"
         return self.__make_trakt_api_call(url, f"自定义列表 {username}/{list_id}")
 
-    def __sync_media(self, media_data: dict, media_type: MediaType, history: List[dict] = None, source: str = "watchlist") -> Optional[dict]:
+    def __sync_media(self, media_data: dict, media_type: MediaType, history: List[dict] = None, source: str = "watchlist", force_enable: bool = False) -> Optional[dict]:
         """
         同步单个媒体（电影或剧集）
         :param media_data: 媒体数据
         :param media_type: 媒体类型（MediaType.MOVIE 或 MediaType.TV）
         :param history: 历史记录列表
         :param source: 来源标识（watchlist 或自定义列表名称）
+        :param force_enable: 强制启用订阅（无视配置）
         :return: 返回包含is_new和history的字典，或None
         """
         media_type_name = "电影" if media_type == MediaType.MOVIE else "剧集"
@@ -1469,10 +1626,10 @@ class TraktSync(_PluginBase):
             is_new = False
         else:
             # 添加订阅
-            is_new = self.__add_subscribe(mediainfo, meta)
-            # 根据add_and_enable设置action：开启时为"subscribe"(订阅)，关闭时为"add"(添加)
+            is_new = self.__add_subscribe(mediainfo, meta, force_enable=force_enable)
+            # 根据force_enable或add_and_enable设置action：启用时为"subscribe"(订阅)，关闭时为"add"(添加)
             if is_new:
-                action = "subscribe" if self._add_and_enable else "add"
+                action = "subscribe" if (force_enable or self._add_and_enable) else "add"
             else:
                 action = "exist"
 
@@ -1494,13 +1651,13 @@ class TraktSync(_PluginBase):
             "history": history_item
         }
 
-    def __sync_movie(self, movie_data: dict, history: List[dict] = None, source: str = "watchlist") -> Optional[dict]:
+    def __sync_movie(self, movie_data: dict, history: List[dict] = None, source: str = "watchlist", force_enable: bool = False) -> Optional[dict]:
         """同步单个电影（向后兼容方法）"""
-        return self.__sync_media(movie_data, MediaType.MOVIE, history, source)
+        return self.__sync_media(movie_data, MediaType.MOVIE, history, source, force_enable)
 
-    def __sync_show(self, show_data: dict, history: List[dict] = None, source: str = "watchlist") -> Optional[dict]:
+    def __sync_show(self, show_data: dict, history: List[dict] = None, source: str = "watchlist", force_enable: bool = False) -> Optional[dict]:
         """同步单个剧集（向后兼容方法）"""
-        return self.__sync_media(show_data, MediaType.TV, history, source)
+        return self.__sync_media(show_data, MediaType.TV, history, source, force_enable)
 
     def __is_subscribed(self, tmdb_id: int, mtype: MediaType) -> bool:
         """
@@ -1513,17 +1670,21 @@ class TraktSync(_PluginBase):
         subscribes = subscribeoper.list_by_tmdbid(tmdbid=tmdb_id)
         return len(subscribes) > 0 if subscribes else False
 
-    def __add_subscribe(self, mediainfo, meta) -> bool:
+    def __add_subscribe(self, mediainfo, meta, force_enable: bool = False) -> bool:
         """
         添加订阅
+        :param force_enable: 强制启用订阅（无视配置）
         :return: 是否成功
         """
         try:
-            # 根据"添加并启用订阅"开关决定订阅状态
-            state = 'N' if self._add_and_enable else 'S'
+            # 根据"添加并启用订阅"开关决定订阅状态，或强制启用
+            if force_enable:
+                state = 'N'
+            else:
+                state = 'N' if self._add_and_enable else 'S'
 
             # 添加调试日志
-            logger.info(f"订阅配置: add_and_enable={self._add_and_enable}, state={state}")
+            logger.info(f"订阅配置: add_and_enable={self._add_and_enable}, force_enable={force_enable}, state={state}")
 
             subscribe_id, message = SubscribeChain().add(
                 title=mediainfo.title,
@@ -1536,7 +1697,7 @@ class TraktSync(_PluginBase):
                 state=state  # 设置订阅状态
             )
             if subscribe_id:
-                status_text = "激活订阅" if self._add_and_enable else "暂停订阅"
+                status_text = "激活订阅" if state == 'N' else "暂停订阅"
                 logger.info(f"添加订阅成功: {mediainfo.title_year} (状态: {status_text}, state={state})")
                 return True
             else:
@@ -1626,8 +1787,8 @@ class TraktSync(_PluginBase):
         return self.__api_wrapper(apikey, "Trakt想看同步", self.sync)
 
     def api_sync_download(self, apikey: str):
-        """API端点：触发同步并下载"""
-        return self.__api_wrapper(apikey, "Trakt想看同步并下载", self.sync)
+        """API端点：触发同步并下载（强制启用订阅）"""
+        return self.__api_wrapper(apikey, "Trakt想看同步并下载", self.sync_download)
 
     def api_sync_custom_lists(self, apikey: str):
         """API端点：触发自定义列表同步"""
@@ -1656,8 +1817,8 @@ class TraktSync(_PluginBase):
         return self.__action_wrapper(action_content, "Trakt想看同步", self.sync)
 
     def action_sync_download(self, action_content):
-        """工作流动作：同步并下载Trakt想看"""
-        return self.__action_wrapper(action_content, "Trakt想看同步并下载", self.sync)
+        """工作流动作：同步并下载Trakt想看（强制启用订阅）"""
+        return self.__action_wrapper(action_content, "Trakt想看同步并下载", self.sync_download)
 
     def action_sync_custom_lists(self, action_content):
         """工作流动作：同步Trakt自定义列表"""
