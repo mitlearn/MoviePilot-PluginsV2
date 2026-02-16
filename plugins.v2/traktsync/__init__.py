@@ -14,7 +14,7 @@ from app.chain.subscribe import SubscribeChain
 from app.chain.download import DownloadChain
 from app.chain.search import SearchChain
 from app.helper.mediaserver import MediaServerHelper
-from app.core.meta import MetaInfo
+from app.core.metainfo import MetaInfo
 from app.db.systemconfig_oper import SystemConfigOper
 from app.db.subscribe_oper import SubscribeOper
 from app.schemas import SystemConfigKey
