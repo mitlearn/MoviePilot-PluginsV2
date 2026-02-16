@@ -25,8 +25,8 @@ class TraktSync(_PluginBase):
     plugin_desc = "同步Trakt想看数据，自动添加订阅。"
     plugin_icon = "Trakt_A.png"
     plugin_version = "0.1.0"
-    plugin_author = "MoviePilot"
-    author_url = "https://github.com/jxxghp/MoviePilot"
+    plugin_author = "Claude"
+    author_url = "https://github.com/"
     plugin_config_prefix = "traktsync_"
     plugin_order = 20
     auth_level = 2
@@ -49,6 +49,7 @@ class TraktSync(_PluginBase):
     _notify: bool = True
     _client_id: str = ""
     _client_secret: str = ""
+    _auth_code: str = ""
     _refresh_token: str = ""
     _access_token: str = ""
     _token_expires_at: Optional[datetime.datetime] = None
@@ -71,6 +72,7 @@ class TraktSync(_PluginBase):
             self._onlyonce = config.get("onlyonce", False)
             self._client_id = config.get("client_id", "")
             self._client_secret = config.get("client_secret", "")
+            self._auth_code = config.get("auth_code", "")
             self._refresh_token = config.get("refresh_token", "")
             self._access_token = config.get("access_token", "")
             self._auto_download = config.get("auto_download", False)
@@ -83,6 +85,26 @@ class TraktSync(_PluginBase):
                 except Exception as e:
                     logger.error(f"解析 token 过期时间失败: {str(e)}")
                     self._token_expires_at = None
+
+            # 如果填写了client_id和client_secret，但没有refresh_token，生成授权链接
+            if self._client_id and self._client_secret and not self._refresh_token:
+                auth_url = f"https://trakt.tv/oauth/authorize?response_type=code&client_id={self._client_id}&redirect_uri=urn:ietf:wg:oauth:2.0:oob"
+                logger.info("=" * 80)
+                logger.info("请访问以下链接进行授权:")
+                logger.info(auth_url)
+                logger.info("授权后，将获得的授权码填入配置页面的【授权码】字段，然后保存配置")
+                logger.info("=" * 80)
+
+            # 如果填写了授权码，尝试获取token
+            if self._auth_code and not self._refresh_token:
+                logger.info("检测到授权码，正在获取Token...")
+                if self.__get_token_from_code():
+                    logger.info("Token获取成功！")
+                    # 清空授权码
+                    self._auth_code = ""
+                    self.__update_config()
+                else:
+                    logger.error("Token获取失败，请检查授权码是否正确")
 
         # 立即运行一次
         if self._enabled or self._onlyonce:
@@ -117,6 +139,7 @@ class TraktSync(_PluginBase):
             "cron": self._cron,
             "client_id": self._client_id,
             "client_secret": self._client_secret,
+            "auth_code": self._auth_code,
             "refresh_token": self._refresh_token,
             "access_token": self._access_token,
             "auto_download": self._auto_download,
@@ -233,13 +256,29 @@ class TraktSync(_PluginBase):
                         'content': [
                             {
                                 'component': 'VCol',
-                                'props': {'cols': 12},
+                                'props': {'cols': 12, 'md': 6},
+                                'content': [{
+                                    'component': 'VTextField',
+                                    'props': {
+                                        'model': 'auth_code',
+                                        'label': '授权码（Authorization Code）',
+                                        'placeholder': '填写授权码后保存，将自动获取Token',
+                                        'hint': '填写授权码后将自动获取并保存Refresh Token',
+                                        'persistent-hint': True
+                                    }
+                                }]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 6},
                                 'content': [{
                                     'component': 'VTextField',
                                     'props': {
                                         'model': 'refresh_token',
-                                        'label': 'Refresh Token',
-                                        'placeholder': '请输入Trakt的Refresh Token'
+                                        'label': 'Refresh Token（可选）',
+                                        'placeholder': '自动获取，也可手动填写',
+                                        'hint': '通过授权码自动获取，或手动填写',
+                                        'persistent-hint': True
                                     }
                                 }]
                             },
@@ -256,10 +295,14 @@ class TraktSync(_PluginBase):
                                     'props': {
                                         'type': 'info',
                                         'variant': 'tonal',
-                                        'text': '1. 前往 https://trakt.tv/oauth/applications/new 创建应用（Redirect URI填：urn:ietf:wg:oauth:2.0:oob）\n'
-                                               '2. 获取 Client ID 和 Client Secret\n'
-                                               '3. 参考使用说明获取 Refresh Token\n'
-                                               '4. 搜索下载开启后，会自动搜索资源并下载，未下载完成的会自动添加订阅'
+                                        'text': '使用说明：\n'
+                                               '1. 前往 https://trakt.tv/oauth/applications/new 创建应用\n'
+                                               '   - Redirect URI必须填写：urn:ietf:wg:oauth:2.0:oob\n'
+                                               '2. 填写Client ID和Client Secret后保存，日志中会输出授权链接\n'
+                                               '3. 访问授权链接，授权后将获得授权码\n'
+                                               '4. 将授权码填入【授权码】字段并保存，插件将自动获取Token\n'
+                                               '5. 搜索下载开启后，会自动搜索资源并下载，未下载完成的会自动添加订阅\n'
+                                               '6. Token有效期3个月，过期前会自动刷新'
                                     }
                                 }]
                             }
@@ -274,34 +317,171 @@ class TraktSync(_PluginBase):
             "cron": "0 8 * * *",
             "client_id": "",
             "client_secret": "",
+            "auth_code": "",
             "refresh_token": "",
             "auto_download": False
         }
 
     def get_page(self) -> Optional[List[dict]]:
         """插件详情页面"""
-        return None
+        # 查询同步详情
+        historys = self.get_data('history')
+        if not historys:
+            return [
+                {
+                    'component': 'div',
+                    'text': '暂无数据',
+                    'props': {
+                        'class': 'text-center',
+                    }
+                }
+            ]
+        # 数据按时间降序排序
+        historys = sorted(historys, key=lambda x: x.get('time'), reverse=True)
+        # 拼装页面
+        contents = []
+        for history in historys:
+            title = history.get("title")
+            poster = history.get("poster")
+            mtype = history.get("type")
+            time_str = history.get("time")
+            tmdbid = history.get("tmdbid")
+            action = "下载" if history.get("action") == "download" else "订阅" if history.get("action") == "subscribe" \
+                else "存在" if history.get("action") == "exist" else history.get("action")
+            contents.append(
+                {
+                    'component': 'VCard',
+                    'content': [
+                        {
+                            "component": "VDialogCloseBtn",
+                            "props": {
+                                'innerClass': 'absolute top-0 right-0',
+                            },
+                            'events': {
+                                'click': {
+                                    'api': 'plugin/TraktSync/delete_history',
+                                    'method': 'get',
+                                    'params': {
+                                        'tmdbid': tmdbid,
+                                        'apikey': settings.API_TOKEN
+                                    }
+                                }
+                            },
+                        },
+                        {
+                            'component': 'div',
+                            'props': {
+                                'class': 'd-flex justify-space-start flex-nowrap flex-row',
+                            },
+                            'content': [
+                                {
+                                    'component': 'div',
+                                    'content': [
+                                        {
+                                            'component': 'VImg',
+                                            'props': {
+                                                'src': poster,
+                                                'height': 120,
+                                                'width': 80,
+                                                'aspect-ratio': '2/3',
+                                                'class': 'object-cover shadow ring-gray-500',
+                                                'cover': True
+                                            }
+                                        }
+                                    ]
+                                },
+                                {
+                                    'component': 'div',
+                                    'content': [
+                                        {
+                                            'component': 'VCardTitle',
+                                            'props': {
+                                                'class': 'ps-1 pe-5 break-words whitespace-break-spaces'
+                                            },
+                                            'content': [
+                                                {
+                                                    'component': 'a',
+                                                    'props': {
+                                                        'href': f"https://www.themoviedb.org/{mtype.lower()}/{tmdbid}",
+                                                        'target': '_blank'
+                                                    },
+                                                    'text': title
+                                                }
+                                            ]
+                                        },
+                                        {
+                                            'component': 'VCardText',
+                                            'props': {
+                                                'class': 'pa-0 px-2'
+                                            },
+                                            'text': f'类型：{mtype}'
+                                        },
+                                        {
+                                            'component': 'VCardText',
+                                            'props': {
+                                                'class': 'pa-0 px-2'
+                                            },
+                                            'text': f'时间：{time_str}'
+                                        },
+                                        {
+                                            'component': 'VCardText',
+                                            'props': {
+                                                'class': 'pa-0 px-2'
+                                            },
+                                            'text': f'操作：{action}'
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            )
+
+        return [
+            {
+                'component': 'div',
+                'props': {
+                    'class': 'grid gap-3 grid-info-card',
+                },
+                'content': contents
+            }
+        ]
 
     def get_service(self) -> List[Dict[str, Any]]:
         """注册常驻定时服务"""
+        services = []
+
+        # Token 自动刷新服务（每天检查一次，提前7天自动刷新）
+        if self._enabled and self._refresh_token:
+            services.append({
+                "id": "TraktTokenRefresh",
+                "name": "Trakt Token自动刷新",
+                "trigger": "interval",
+                "func": self.__refresh_access_token,
+                "kwargs": {"days": 1}
+            })
+
+        # 同步服务
         if self._enabled and self._cron:
-            return [{
+            services.append({
                 "id": "TraktSync",
                 "name": "Trakt想看同步服务",
                 "trigger": CronTrigger.from_crontab(self._cron),
                 "func": self.sync,
                 "kwargs": {}
-            }]
+            })
         elif self._enabled:
             # 无 cron 时，默认每天执行一次
-            return [{
+            services.append({
                 "id": "TraktSync",
                 "name": "Trakt想看同步服务",
                 "trigger": "interval",
                 "func": self.sync,
                 "kwargs": {"days": 1}
-            }]
-        return []
+            })
+
+        return services
 
     @staticmethod
     def get_command() -> List[Dict[str, Any]]:
@@ -359,7 +539,14 @@ class TraktSync(_PluginBase):
 
     def get_api(self) -> List[Dict[str, Any]]:
         """注册API"""
-        return []
+        return [
+            {
+                "path": "/delete_history",
+                "endpoint": self.delete_history,
+                "methods": ["GET"],
+                "summary": "删除Trakt同步历史记录"
+            }
+        ]
 
     def stop_service(self):
         """停止服务"""
@@ -392,6 +579,9 @@ class TraktSync(_PluginBase):
 
         logger.info("开始同步Trakt想看列表...")
 
+        # 读取历史记录
+        history: List[dict] = self.get_data('history') or []
+
         # 统计数据
         stats = {
             "movies_added": 0,
@@ -411,10 +601,14 @@ class TraktSync(_PluginBase):
             for item in movies:
                 try:
                     movie_data = item.get("movie", {})
-                    if self.__sync_movie(movie_data, enable_download):
-                        stats["movies_added"] += 1
-                    else:
-                        stats["movies_exists"] += 1
+                    result = self.__sync_movie(movie_data, enable_download, history)
+                    if result:
+                        if result.get("is_new"):
+                            stats["movies_added"] += 1
+                        else:
+                            stats["movies_exists"] += 1
+                        # 添加到历史记录
+                        history.append(result.get("history"))
                 except Exception as e:
                     logger.error(f"同步电影失败: {str(e)}")
                     stats["errors"] += 1
@@ -426,13 +620,20 @@ class TraktSync(_PluginBase):
             for item in shows:
                 try:
                     show_data = item.get("show", {})
-                    if self.__sync_show(show_data, enable_download):
-                        stats["shows_added"] += 1
-                    else:
-                        stats["shows_exists"] += 1
+                    result = self.__sync_show(show_data, enable_download, history)
+                    if result:
+                        if result.get("is_new"):
+                            stats["shows_added"] += 1
+                        else:
+                            stats["shows_exists"] += 1
+                        # 添加到历史记录
+                        history.append(result.get("history"))
                 except Exception as e:
                     logger.error(f"同步剧集失败: {str(e)}")
                     stats["errors"] += 1
+
+        # 保存历史记录
+        self.save_data('history', history)
 
         # 发送通知
         if self._notify:
@@ -444,15 +645,61 @@ class TraktSync(_PluginBase):
                    f"已存在剧集 {stats['shows_exists']} 部，"
                    f"错误 {stats['errors']} 个")
 
+    def __get_token_from_code(self) -> bool:
+        """
+        使用授权码获取 access token 和 refresh token
+        :return: 是否成功
+        """
+        if not self._auth_code or not self._client_id or not self._client_secret:
+            logger.error("授权码、Client ID或Client Secret为空")
+            return False
+
+        try:
+            # 发起 token 请求
+            response = RequestUtils(
+                headers={"Content-Type": "application/json"},
+                proxies=settings.PROXY
+            ).post_res(
+                url=self._oauth_url,
+                json={
+                    "code": self._auth_code,
+                    "client_id": self._client_id,
+                    "client_secret": self._client_secret,
+                    "redirect_uri": "urn:ietf:wg:oauth:2.0:oob",
+                    "grant_type": "authorization_code"
+                }
+            )
+
+            if not response or response.status_code != 200:
+                logger.error(f"获取Token失败: {response.status_code if response else 'No response'}")
+                if response:
+                    logger.error(f"响应内容: {response.text}")
+                return False
+
+            token_data = response.json()
+            self._access_token = token_data.get("access_token")
+            self._refresh_token = token_data.get("refresh_token")
+            expires_in = token_data.get("expires_in", 7776000)  # Trakt默认90天
+
+            # 计算过期时间
+            self._token_expires_at = datetime.datetime.now(tz=pytz.UTC) + datetime.timedelta(seconds=expires_in)
+
+            logger.info(f"Token获取成功，有效期至 {self._token_expires_at.isoformat()}")
+            return True
+
+        except Exception as e:
+            logger.error(f"获取Token异常: {str(e)}")
+            return False
+
     def __refresh_access_token(self) -> bool:
         """
         刷新 Trakt access token
         :return: 是否成功
         """
-        # 检查 token 是否需要刷新（提前1小时刷新）
+        # 检查 token 是否需要刷新（提前7天刷新）
         if self._access_token and self._token_expires_at:
             now = datetime.datetime.now(tz=pytz.UTC)
-            if self._token_expires_at > now + datetime.timedelta(hours=1):
+            if self._token_expires_at > now + datetime.timedelta(days=7):
                 logger.debug("Access token未过期，无需刷新")
                 return True
 
@@ -483,7 +730,7 @@ class TraktSync(_PluginBase):
             token_data = response.json()
             self._access_token = token_data.get("access_token")
             new_refresh_token = token_data.get("refresh_token")
-            expires_in = token_data.get("expires_in", 86400)  # 默认24小时
+            expires_in = token_data.get("expires_in", 7776000)  # Trakt默认90天
 
             # 更新 refresh token（如果返回了新的）
             if new_refresh_token:
@@ -554,12 +801,13 @@ class TraktSync(_PluginBase):
             logger.error(f"获取想看剧集异常: {str(e)}")
             return None
 
-    def __sync_movie(self, movie_data: dict, enable_download: bool = False) -> bool:
+    def __sync_movie(self, movie_data: dict, enable_download: bool = False, history: List[dict] = None) -> Optional[dict]:
         """
         同步单个电影
         :param movie_data: 电影数据
         :param enable_download: 是否启用搜索下载
-        :return: 是否为新增（True=新增，False=已存在）
+        :param history: 历史记录列表
+        :return: 返回包含is_new和history的字典，或None
         """
         title = movie_data.get("title")
         year = movie_data.get("year")
@@ -569,7 +817,12 @@ class TraktSync(_PluginBase):
 
         if not tmdb_id:
             logger.warning(f"电影 {title} ({year}) 缺少TMDB ID，跳过")
-            return False
+            return None
+
+        # 检查是否已处理过
+        if history and tmdb_id in [h.get("tmdbid") for h in history]:
+            logger.info(f"电影 {title} ({year}) [TMDB: {tmdb_id}] 已处理过")
+            return None
 
         logger.info(f"处理电影: {title} ({year}) [TMDB: {tmdb_id}]")
 
@@ -581,7 +834,7 @@ class TraktSync(_PluginBase):
         mediainfo = self.chain.recognize_media(meta=meta, tmdbid=tmdb_id)
         if not mediainfo:
             logger.error(f"无法识别电影: {title} ({year})")
-            return False
+            return None
 
         # 检查是否已存在
         downloadchain = DownloadChain()
@@ -589,26 +842,46 @@ class TraktSync(_PluginBase):
 
         if exist_flag:
             logger.info(f'{mediainfo.title_year} 媒体库中已存在')
-            return False
-
-        # 检查是否已订阅
-        if self.__is_subscribed(tmdb_id, MediaType.MOVIE):
+            action = "exist"
+            is_new = False
+        elif self.__is_subscribed(tmdb_id, MediaType.MOVIE):
             logger.info(f'{mediainfo.title_year} 已在订阅中')
-            return False
-
-        # 如果启用搜索下载
-        if enable_download:
-            return self.__search_and_download_movie(mediainfo, meta)
+            action = "subscribe"
+            is_new = False
         else:
-            # 添加订阅
-            return self.__add_subscribe(mediainfo, meta)
+            # 如果启用搜索下载
+            if enable_download:
+                is_new = self.__search_and_download_movie(mediainfo, meta)
+                action = "download" if is_new else "subscribe"
+            else:
+                # 添加订阅
+                is_new = self.__add_subscribe(mediainfo, meta)
+                action = "subscribe" if is_new else "exist"
 
-    def __sync_show(self, show_data: dict, enable_download: bool = False) -> bool:
+        # 存储历史记录
+        history_item = {
+            "action": action,
+            "title": mediainfo.title_year,
+            "type": mediainfo.type.value,
+            "year": mediainfo.year,
+            "poster": mediainfo.get_poster_image(),
+            "overview": mediainfo.overview,
+            "tmdbid": tmdb_id,
+            "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+        return {
+            "is_new": is_new,
+            "history": history_item
+        }
+
+    def __sync_show(self, show_data: dict, enable_download: bool = False, history: List[dict] = None) -> Optional[dict]:
         """
         同步单个剧集
         :param show_data: 剧集数据
         :param enable_download: 是否启用搜索下载
-        :return: 是否为新增（True=新增，False=已存在）
+        :param history: 历史记录列表
+        :return: 返回包含is_new和history的字典，或None
         """
         title = show_data.get("title")
         year = show_data.get("year")
@@ -617,7 +890,12 @@ class TraktSync(_PluginBase):
 
         if not tmdb_id:
             logger.warning(f"剧集 {title} ({year}) 缺少TMDB ID，跳过")
-            return False
+            return None
+
+        # 检查是否已处理过
+        if history and tmdb_id in [h.get("tmdbid") for h in history]:
+            logger.info(f"剧集 {title} ({year}) [TMDB: {tmdb_id}] 已处理过")
+            return None
 
         logger.info(f"处理剧集: {title} ({year}) [TMDB: {tmdb_id}]")
 
@@ -629,19 +907,39 @@ class TraktSync(_PluginBase):
         mediainfo = self.chain.recognize_media(meta=meta, tmdbid=tmdb_id)
         if not mediainfo:
             logger.error(f"无法识别剧集: {title} ({year})")
-            return False
+            return None
 
         # 检查是否已订阅
         if self.__is_subscribed(tmdb_id, MediaType.TV):
             logger.info(f'{mediainfo.title_year} 已在订阅中')
-            return False
-
-        # 如果启用搜索下载
-        if enable_download:
-            return self.__search_and_download_show(mediainfo, meta)
+            action = "subscribe"
+            is_new = False
         else:
-            # 添加订阅
-            return self.__add_subscribe(mediainfo, meta)
+            # 如果启用搜索下载
+            if enable_download:
+                is_new = self.__search_and_download_show(mediainfo, meta)
+                action = "download" if is_new else "subscribe"
+            else:
+                # 添加订阅
+                is_new = self.__add_subscribe(mediainfo, meta)
+                action = "subscribe" if is_new else "exist"
+
+        # 存储历史记录
+        history_item = {
+            "action": action,
+            "title": mediainfo.title_year,
+            "type": mediainfo.type.value,
+            "year": mediainfo.year,
+            "poster": mediainfo.get_poster_image(),
+            "overview": mediainfo.overview,
+            "tmdbid": tmdb_id,
+            "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+        return {
+            "is_new": is_new,
+            "history": history_item
+        }
 
     def __is_subscribed(self, tmdb_id: int, mtype: MediaType) -> bool:
         """
@@ -651,7 +949,7 @@ class TraktSync(_PluginBase):
         :return: 是否已订阅
         """
         subscribeoper = SubscribeOper()
-        subscribes = subscribeoper.list(tmdbid=tmdb_id)
+        subscribes = subscribeoper.list_by_tmdbid(tmdbid=tmdb_id)
         return len(subscribes) > 0 if subscribes else False
 
     def __add_subscribe(self, mediainfo, meta) -> bool:
@@ -805,3 +1103,20 @@ class TraktSync(_PluginBase):
             title="Trakt想看同步完成",
             text=text
         )
+
+    def delete_history(self, tmdbid: str, apikey: str):
+        """
+        删除同步历史记录
+        """
+        from app import schemas
+
+        if apikey != settings.API_TOKEN:
+            return schemas.Response(success=False, message="API密钥错误")
+        # 历史记录
+        historys = self.get_data('history')
+        if not historys:
+            return schemas.Response(success=False, message="未找到历史记录")
+        # 删除指定记录
+        historys = [h for h in historys if str(h.get("tmdbid")) != str(tmdbid)]
+        self.save_data('history', historys)
+        return schemas.Response(success=True, message="删除成功")
