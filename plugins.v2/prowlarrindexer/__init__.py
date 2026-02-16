@@ -1243,7 +1243,7 @@ class ProwlarrIndexer(_PluginBase):
                                             'type': 'success',
                                             'variant': 'tonal',
                                             'border': 'start',
-                                            'text': '📖 使用说明：https://github.com/mitlearn/MoviePilot-PluginsV2#-快速开始\n❓ 常见问题：https://github.com/mitlearn/MoviePilot-PluginsV2#-常见问题'
+                                            'text': '📖 使用说明：https://github.com/mitlearn/MoviePilot-PluginsV2/blob/main/plugins.v2/prowlarrindexer/README.md#-快速开始\n❓ 常见问题：https://github.com/mitlearn/MoviePilot-PluginsV2/blob/main/plugins.v2/prowlarrindexer/README.md#-常见问题'
                                         }
                                     }
                                 ]
