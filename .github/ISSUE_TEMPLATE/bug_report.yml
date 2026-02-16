@@ -11,9 +11,9 @@ body:
         > 本项目由 AI Coding 而成。如遇问题，请详细描述问题现象、错误日志及复现步骤。AI 能理解的问题就能修复！
 
         **提交前请确认：**
-        - [ ] 已查看 [常见问题](https://github.com/mitlearn/MoviePilot-PluginsV2#-常见问题)
+        - [ ] 已查看对应插件的 README 文档和常见问题章节
         - [ ] 已将 MoviePilot 日志等级设置为 DEBUG
-        - [ ] 已收集 MoviePilot 和 Prowlarr/Jackett 的日志
+        - [ ] 已收集完整的日志信息
 
   - type: dropdown
     id: plugin
@@ -23,7 +23,8 @@ body:
       options:
         - Prowlarr索引器
         - Jackett索引器
-        - 两个都有问题
+        - TraktSync
+        - 多个插件
     validations:
       required: true
 
@@ -39,11 +40,14 @@ body:
   - type: input
     id: backend-version
     attributes:
-      label: Prowlarr/Jackett 版本
-      description: 在对应服务界面查看版本号
-      placeholder: "例如：Prowlarr v1.10.0 或 Jackett v0.21.0"
+      label: 后端服务版本（如果适用）
+      description: |
+        - Prowlarr索引器：填写 Prowlarr 版本
+        - Jackett索引器：填写 Jackett 版本
+        - TraktSync：填写 N/A 或留空
+      placeholder: "例如：Prowlarr v1.10.0 或 Jackett v0.21.0 或 N/A"
     validations:
-      required: true
+      required: false
 
   - type: input
     id: plugin-version
@@ -116,7 +120,10 @@ body:
         1. 进入 **设置 → 系统 → 日志等级**，选择 **DEBUG**，保存并重启
         2. 复现问题后，进入 **设置 → 系统 → 实时日志**
         3. 点击右上角 **新标签页打开**
-        4. 搜索（Ctrl+F）关键词：`Prowlarr索引器` 或 `Jackett索引器`
+        4. 搜索（Ctrl+F）关键词：
+           - Prowlarr索引器：`Prowlarr索引器`
+           - Jackett索引器：`Jackett索引器`
+           - TraktSync：`Trakt` 或 `TraktSync`
         5. 复制与问题相关的日志内容（包括前后上下文）
       placeholder: |
         粘贴 MoviePilot DEBUG 日志...
@@ -127,20 +134,23 @@ body:
   - type: textarea
     id: backend-logs
     attributes:
-      label: Prowlarr/Jackett 日志
+      label: 后端服务日志（如果适用）
       description: |
-        **Prowlarr 日志获取：**
+        **Prowlarr 索引器插件：**
         - 打开 **设置 → 通用 → 日志**，选择 **Debug**
         - **设置 → 系统 → 日志 → 文件 → 下载**最新日志
 
-        **Jackett 日志获取：**
+        **Jackett 索引器插件：**
         - 勾选 **Enhanced logging** 并保存
         - 点击 **View logs** 或查看服务器日志文件
+
+        **TraktSync 插件：**
+        - 填写 N/A 或留空（仅需 MoviePilot 日志）
       placeholder: |
-        粘贴 Prowlarr DEBUG 日志或 Jackett Enhanced 日志...
+        粘贴 Prowlarr/Jackett 日志，或填写 N/A...
       render: shell
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: additional

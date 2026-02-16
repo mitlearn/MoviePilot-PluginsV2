@@ -1,8 +1,14 @@
 blank_issues_enabled: false
 contact_links:
-  - name: 📖 使用文档
-    url: https://github.com/mitlearn/MoviePilot-PluginsV2#-快速开始
-    about: 查看插件使用说明和配置指南
-  - name: ❓ 常见问题
-    url: https://github.com/mitlearn/MoviePilot-PluginsV2#-常见问题
-    about: 查看常见问题解答，可能已有解决方案
+  - name: 📖 插件文档
+    url: https://github.com/mitlearn/MoviePilot-PluginsV2#-文档
+    about: 查看各插件的完整文档（配置、FAQ、故障排除）
+  - name: 🔌 Prowlarr 索引器文档
+    url: https://github.com/mitlearn/MoviePilot-PluginsV2/tree/main/plugins.v2/prowlarrindexer
+    about: Prowlarr 索引器插件使用说明
+  - name: 🔌 Jackett 索引器文档
+    url: https://github.com/mitlearn/MoviePilot-PluginsV2/tree/main/plugins.v2/jackettindexer
+    about: Jackett 索引器插件使用说明
+  - name: 🔌 TraktSync 文档
+    url: https://github.com/mitlearn/MoviePilot-PluginsV2/tree/main/plugins.v2/traktsync
+    about: TraktSync 插件使用说明

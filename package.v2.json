@@ -32,5 +32,17 @@
       "v1.4.0": "优化错误信息显示；调整日志等级；删除连通性测试；统一变量命名",
       "v1.5.0": "新增搜索API端点；支持外部调用搜索功能；支持指定索引器搜索；支持IMDb ID和关键词搜索"
     }
+  },
+  "TraktSync": {
+    "name": "Trakt想看",
+    "description": "同步Trakt想看列表，自动添加订阅或搜索下载。支持OAuth认证与自动Token刷新。",
+    "labels": "订阅,trakt,同步",
+    "version": "0.1.0",
+    "icon": "trakt.png",
+    "author": "MoviePilot",
+    "level": 2,
+    "history": {
+      "v0.1.0": "初始版本；支持同步Trakt Watchlist电影和剧集；OAuth 2.0认证；自动Token刷新；定时任务；远程命令；可选自动搜索下载"
+    }
   }
 }

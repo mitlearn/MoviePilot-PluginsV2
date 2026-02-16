@@ -18,7 +18,8 @@ body:
       options:
         - Prowlarr索引器
         - Jackett索引器
-        - 两个插件都适用
+        - TraktSync
+        - 多个插件
         - 新插件建议
     validations:
       required: true
