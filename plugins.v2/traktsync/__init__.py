@@ -54,7 +54,6 @@ class TraktSync(_PluginBase):
     _access_token: str = ""
     _token_expires_at: Optional[datetime.datetime] = None
     _add_and_enable: bool = True  # 添加并启用订阅（开启则state=N，关闭则state=S）
-    _auto_download: bool = False  # 搜索下载（仅在add_and_enable开启时可用）
     _sync_type: str = "all"  # 同步类型：all/movie/tv
     _last_sync_time: str = ""  # 上次同步时间
     _tabs: str = "sync_tab"  # 当前标签页
@@ -82,13 +81,6 @@ class TraktSync(_PluginBase):
             self._refresh_token = config.get("refresh_token", "")
             self._access_token = config.get("access_token", "")
             self._add_and_enable = config.get("add_and_enable", True)
-            self._auto_download = config.get("auto_download", False)
-
-            # 逻辑约束：搜索下载依赖于添加并启用订阅
-            if not self._add_and_enable and self._auto_download:
-                self._auto_download = False
-                logger.info("已自动关闭搜索下载功能（需要先启用订阅）")
-
             self._sync_type = config.get("sync_type", "all")
             self._last_sync_time = config.get("last_sync_time", "")
             self._tabs = config.get("_tabs", "sync_tab")
@@ -161,7 +153,6 @@ class TraktSync(_PluginBase):
             "refresh_token": self._refresh_token,
             "access_token": self._access_token,
             "add_and_enable": self._add_and_enable,
-            "auto_download": self._auto_download,
             "sync_type": self._sync_type,
             "last_sync_time": self._last_sync_time,
             "_tabs": self._tabs,
@@ -285,7 +276,7 @@ class TraktSync(_PluginBase):
                                                     'component': 'VSelect',
                                                     'props': {
                                                         'model': 'sync_type',
-                                                        'label': '同步类型',
+                                                        'label': 'Watchlist同步类型',
                                                         'items': [
                                                             {'title': '全部', 'value': 'all'},
                                                             {'title': '仅电影', 'value': 'movie'},
@@ -303,26 +294,13 @@ class TraktSync(_PluginBase):
                                         'content': [
                                             {
                                                 'component': 'VCol',
-                                                'props': {'cols': 12, 'md': 6},
+                                                'props': {'cols': 12},
                                                 'content': [{
                                                     'component': 'VSwitch',
                                                     'props': {
                                                         'model': 'add_and_enable',
-                                                        'label': '添加并启用订阅',
-                                                        'hint': '开启后添加的订阅为激活状态，关闭后为暂停状态',
-                                                        'persistent-hint': True
-                                                    }
-                                                }]
-                                            },
-                                            {
-                                                'component': 'VCol',
-                                                'props': {'cols': 12, 'md': 6},
-                                                'content': [{
-                                                    'component': 'VSwitch',
-                                                    'props': {
-                                                        'model': 'auto_download',
-                                                        'label': '搜索下载',
-                                                        'hint': '开启后优先搜索下载（需先启用"添加并启用订阅"）',
+                                                        'label': '添加启用的订阅',
+                                                        'hint': '开启后添加的订阅为激活状态(N)，MoviePilot会自动搜索下载；关闭后为暂停状态(S)，不会触发搜索',
                                                         'persistent-hint': True
                                                     }
                                                 }]
@@ -361,10 +339,9 @@ class TraktSync(_PluginBase):
                                                         'variant': 'tonal',
                                                         'text': '同步设置说明：\n'
                                                                '• 同步周期：设置定时同步的执行周期，支持cron表达式\n'
-                                                               '• 同步类型：选择同步电影、剧集或全部（仅对Watchlist生效）\n'
-                                                               '• 添加并启用订阅：开启后添加的订阅为激活状态(N)会触发搜索，关闭后为暂停状态(S)\n'
-                                                               '• 搜索下载：开启后优先搜索并下载，失败时添加订阅（依赖于"添加并启用订阅"）\n'
-                                                               '• 自定义列表：全同步电影和剧集，不受同步类型限制，支持多个列表（逗号分隔）'
+                                                               '• Watchlist同步类型：选择同步电影、剧集或全部（仅对Watchlist生效）\n'
+                                                               '• 添加启用的订阅：开启后添加的订阅为激活状态(N)会触发搜索，关闭后为暂停状态(S)\n'
+                                                               '• 自定义列表：全同步电影和剧集，不受Watchlist同步类型限制，支持多个列表（逗号分隔）'
                                                     }
                                                 }]
                                             }
@@ -505,7 +482,6 @@ class TraktSync(_PluginBase):
             "cron": "0 8 * * *",
             "sync_type": "all",
             "add_and_enable": True,
-            "auto_download": False,
             "use_proxy": False,
             "client_id": "",
             "client_secret": "",
@@ -850,8 +826,8 @@ class TraktSync(_PluginBase):
             source = history.get("source", "watchlist")
             time_str = history.get("time")
             tmdbid = history.get("tmdbid")
-            action = "下载" if history.get("action") == "download" else "添加" if history.get("action") == "subscribe" \
-                else "存在" if history.get("action") == "exist" else history.get("action")
+            action = "下载" if history.get("action") == "download" else "订阅" if history.get("action") == "subscribe" \
+                else "添加" if history.get("action") == "add" else "存在" if history.get("action") == "exist" else history.get("action")
 
             # 根据source显示类型：watchlist显示媒体类型，自定义列表显示列表名称
             if source == "watchlist":
@@ -1062,9 +1038,8 @@ class TraktSync(_PluginBase):
                 userid=event_data.get("user")
             )
 
-        # 执行同步（如果是 trakt_download 则强制开启自动下载）
-        subscribe_active = event.event_data.get("action") == "trakt_download" if event else False
-        self.sync(force_download=subscribe_active)
+        # 执行同步
+        self.sync()
 
         if event:
             self.post_message(
@@ -1134,10 +1109,9 @@ class TraktSync(_PluginBase):
     # 核心同步逻辑
     # ────────────────────────────────────────────────────────────────
 
-    def sync(self, force_download: bool = False):
+    def sync(self):
         """
         同步Trakt想看列表
-        :param force_download: 是否强制开启搜索下载（用于远程命令）
         """
         if not self._client_id or not self._client_secret or not self._refresh_token:
             logger.error("Trakt配置不完整，请检查Client ID、Client Secret和Refresh Token")
@@ -1156,9 +1130,6 @@ class TraktSync(_PluginBase):
         # 统计数据
         stats = self.__init_sync_stats()
 
-        # 远程命令可强制启用搜索下载
-        enable_download = force_download
-
         # 同步电影（根据 sync_type 判断是否需要同步）
         if self._sync_type in ["all", "movie"]:
             movies = self.__get_watchlist_movies()
@@ -1167,7 +1138,7 @@ class TraktSync(_PluginBase):
                 for item in movies:
                     try:
                         movie_data = item.get("movie", {})
-                        result = self.__sync_movie(movie_data, enable_download, history, source="watchlist")
+                        result = self.__sync_movie(movie_data, history, source="watchlist")
                         if result:
                             if result.get("is_new"):
                                 stats["movies_added"] += 1
@@ -1187,7 +1158,7 @@ class TraktSync(_PluginBase):
                 for item in shows:
                     try:
                         show_data = item.get("show", {})
-                        result = self.__sync_show(show_data, enable_download, history, source="watchlist")
+                        result = self.__sync_show(show_data, history, source="watchlist")
                         if result:
                             if result.get("is_new"):
                                 stats["shows_added"] += 1
@@ -1229,14 +1200,14 @@ class TraktSync(_PluginBase):
                 # 列表名称作为来源
                 list_source = f"{username}/{list_id}"
 
-                # 处理列表项（自定义列表全同步，不受同步类型限制）
+                # 处理列表项（自定义列表全同步，不受Watchlist同步类型限制）
                 for item in items:
                     try:
                         item_type = item.get("type")
 
                         if item_type == "movie":
                             movie_data = item.get("movie", {})
-                            result = self.__sync_movie(movie_data, enable_download, history, source=list_source)
+                            result = self.__sync_movie(movie_data, history, source=list_source)
                             if result:
                                 if result.get("is_new"):
                                     stats["movies_added"] += 1
@@ -1246,7 +1217,7 @@ class TraktSync(_PluginBase):
 
                         elif item_type == "show":
                             show_data = item.get("show", {})
-                            result = self.__sync_show(show_data, enable_download, history, source=list_source)
+                            result = self.__sync_show(show_data, history, source=list_source)
                             if result:
                                 if result.get("is_new"):
                                     stats["shows_added"] += 1
@@ -1446,12 +1417,11 @@ class TraktSync(_PluginBase):
         url = f"{self._api_base}/users/{username}/lists/{list_id}/items"
         return self.__make_trakt_api_call(url, f"自定义列表 {username}/{list_id}")
 
-    def __sync_media(self, media_data: dict, media_type: MediaType, enable_download: bool = False, history: List[dict] = None, source: str = "watchlist") -> Optional[dict]:
+    def __sync_media(self, media_data: dict, media_type: MediaType, history: List[dict] = None, source: str = "watchlist") -> Optional[dict]:
         """
         同步单个媒体（电影或剧集）
         :param media_data: 媒体数据
         :param media_type: 媒体类型（MediaType.MOVIE 或 MediaType.TV）
-        :param enable_download: 是否启用搜索下载（远程命令强制）
         :param history: 历史记录列表
         :param source: 来源标识（watchlist 或自定义列表名称）
         :return: 返回包含is_new和history的字典，或None
@@ -1497,17 +1467,13 @@ class TraktSync(_PluginBase):
             action = "subscribe"
             is_new = False
         else:
-            # 判断是否需要搜索下载
-            # 条件：添加并启用订阅=开启 且 搜索下载=开启（或远程命令强制）
-            if self._add_and_enable and (self._auto_download or enable_download):
-                # 搜索并下载
-                result = self.__search_and_download_with_action(mediainfo, meta, no_exists, media_type)
-                is_new = result.get("is_new")
-                action = result.get("action")
+            # 添加订阅
+            is_new = self.__add_subscribe(mediainfo, meta)
+            # 根据add_and_enable设置action：开启时为"subscribe"(订阅)，关闭时为"add"(添加)
+            if is_new:
+                action = "subscribe" if self._add_and_enable else "add"
             else:
-                # 直接添加订阅
-                is_new = self.__add_subscribe(mediainfo, meta)
-                action = "subscribe" if is_new else "exist"
+                action = "exist"
 
         # 存储历史记录
         history_item = {
@@ -1527,13 +1493,13 @@ class TraktSync(_PluginBase):
             "history": history_item
         }
 
-    def __sync_movie(self, movie_data: dict, enable_download: bool = False, history: List[dict] = None, source: str = "watchlist") -> Optional[dict]:
+    def __sync_movie(self, movie_data: dict, history: List[dict] = None, source: str = "watchlist") -> Optional[dict]:
         """同步单个电影（向后兼容方法）"""
-        return self.__sync_media(movie_data, MediaType.MOVIE, enable_download, history, source)
+        return self.__sync_media(movie_data, MediaType.MOVIE, history, source)
 
-    def __sync_show(self, show_data: dict, enable_download: bool = False, history: List[dict] = None, source: str = "watchlist") -> Optional[dict]:
+    def __sync_show(self, show_data: dict, history: List[dict] = None, source: str = "watchlist") -> Optional[dict]:
         """同步单个剧集（向后兼容方法）"""
-        return self.__sync_media(show_data, MediaType.TV, enable_download, history, source)
+        return self.__sync_media(show_data, MediaType.TV, history, source)
 
     def __is_subscribed(self, tmdb_id: int, mtype: MediaType) -> bool:
         """
@@ -1575,101 +1541,6 @@ class TraktSync(_PluginBase):
         except Exception as e:
             logger.error(f"添加订阅异常: {mediainfo.title_year} - {str(e)}")
             return False
-
-    def __search_and_download_with_action(self, mediainfo, meta, no_exists, media_type: MediaType) -> dict:
-        """
-        搜索并下载媒体（带action返回）
-        :param mediainfo: 媒体信息
-        :param meta: 元数据
-        :param no_exists: 缺失信息
-        :param media_type: 媒体类型（MediaType.MOVIE 或 MediaType.TV）
-        :return: 包含is_new和action的字典
-        """
-        downloadchain = DownloadChain()
-        searchchain = SearchChain()
-        systemconfig = SystemConfigOper()
-
-        # 搜索资源
-        exist_msg = "媒体库中不存在" if media_type == MediaType.MOVIE else "媒体库中不存在或不完整"
-        logger.info(f"{exist_msg}，开启搜索下载，开始搜索 {mediainfo.title_year} 的资源...")
-        filter_results = searchchain.process(
-            mediainfo=mediainfo,
-            no_exists=no_exists,
-            sites=systemconfig.get(SystemConfigKey.RssSites),
-            rule_groups=systemconfig.get(SystemConfigKey.SubscribeFilterRuleGroups)
-        )
-
-        if not filter_results:
-            logger.info(f"未找到符合条件的资源，添加订阅 {mediainfo.title_year}")
-            is_new = self.__add_subscribe(mediainfo, meta)
-            return {"is_new": is_new, "action": "subscribe"}
-
-        # 找到资源，开始下载
-        logger.info(f"找到符合条件的资源，开始下载 {mediainfo.title_year} ...")
-
-        if media_type == MediaType.MOVIE:
-            # 电影使用单个下载
-            download_id = downloadchain.download_single(
-                context=filter_results[0],
-                username="Trakt想看"
-            )
-
-            if download_id:
-                logger.info(f"下载任务已添加: {mediainfo.title_year}")
-                return {"is_new": True, "action": "download"}
-            else:
-                logger.info(f"下载失败，添加订阅 {mediainfo.title_year}")
-                is_new = self.__add_subscribe(mediainfo, meta)
-                return {"is_new": is_new, "action": "subscribe"}
-        else:
-            # 剧集使用批量下载
-            subscribeoper = SubscribeOper()
-            downloaded_list, lefts = downloadchain.batch_download(
-                contexts=filter_results,
-                no_exists=no_exists,
-                username="Trakt想看"
-            )
-
-            if not downloaded_list and not lefts:
-                # 没有下载任何内容
-                logger.info(f"下载失败，添加订阅 {mediainfo.title_year}")
-                is_new = self.__add_subscribe(mediainfo, meta)
-                return {"is_new": is_new, "action": "subscribe"}
-
-            if lefts:
-                # 有未下载完的剧集，添加订阅
-                logger.info(f"下载失败或未下载完所有剧集，添加订阅 {mediainfo.title_year}")
-                sub_id, message = self.__add_subscribe(mediainfo, meta)
-
-                if sub_id:
-                    # 更新订阅信息
-                    logger.info(f"根据缺失剧集更新订阅信息 {mediainfo.title_year}")
-                    subscribe = subscribeoper.get(sub_id)
-                    if subscribe:
-                        SubscribeChain().finish_subscribe_or_not(
-                            subscribe=subscribe,
-                            meta=meta,
-                            mediainfo=mediainfo,
-                            downloads=downloaded_list,
-                            lefts=lefts
-                        )
-
-                # 有下载内容，但未完成
-                if downloaded_list:
-                    return {"is_new": True, "action": "download"}
-                else:
-                    return {"is_new": True, "action": "subscribe"}
-            else:
-                # 全部下载完成
-                return {"is_new": True, "action": "download"}
-
-    def __search_and_download_movie_with_action(self, mediainfo, meta, no_exists) -> dict:
-        """搜索并下载电影（向后兼容方法）"""
-        return self.__search_and_download_with_action(mediainfo, meta, no_exists, MediaType.MOVIE)
-
-    def __search_and_download_show_with_action(self, mediainfo, meta, no_exists) -> dict:
-        """搜索并下载剧集（向后兼容方法）"""
-        return self.__search_and_download_with_action(mediainfo, meta, no_exists, MediaType.TV)
 
     def __send_notification(self, stats: dict):
         """
@@ -1748,11 +1619,11 @@ class TraktSync(_PluginBase):
 
     def api_sync(self, apikey: str):
         """API端点：触发同步"""
-        return self.__api_wrapper(apikey, "Trakt想看同步", self.sync, force_download=False)
+        return self.__api_wrapper(apikey, "Trakt想看同步", self.sync)
 
     def api_sync_download(self, apikey: str):
         """API端点：触发同步并下载"""
-        return self.__api_wrapper(apikey, "Trakt想看同步并下载", self.sync, force_download=True)
+        return self.__api_wrapper(apikey, "Trakt想看同步并下载", self.sync)
 
     def api_sync_custom_lists(self, apikey: str):
         """API端点：触发自定义列表同步"""
@@ -1778,11 +1649,11 @@ class TraktSync(_PluginBase):
 
     def action_sync(self, action_content):
         """工作流动作：同步Trakt想看"""
-        return self.__action_wrapper(action_content, "Trakt想看同步", self.sync, force_download=False)
+        return self.__action_wrapper(action_content, "Trakt想看同步", self.sync)
 
     def action_sync_download(self, action_content):
         """工作流动作：同步并下载Trakt想看"""
-        return self.__action_wrapper(action_content, "Trakt想看同步并下载", self.sync, force_download=True)
+        return self.__action_wrapper(action_content, "Trakt想看同步并下载", self.sync)
 
     def action_sync_custom_lists(self, action_content):
         """工作流动作：同步Trakt自定义列表"""
@@ -1841,14 +1712,14 @@ class TraktSync(_PluginBase):
             # 列表名称作为来源
             list_source = f"{username}/{list_id}"
 
-            # 处理列表项（自定义列表全同步，不受同步类型限制）
+            # 处理列表项（自定义列表全同步，不受Watchlist同步类型限制）
             for item in items:
                 try:
                     item_type = item.get("type")
 
                     if item_type == "movie":
                         movie_data = item.get("movie", {})
-                        result = self.__sync_movie(movie_data, False, history, source=list_source)
+                        result = self.__sync_movie(movie_data, history, source=list_source)
                         if result:
                             if result.get("is_new"):
                                 stats["movies_added"] += 1
@@ -1858,7 +1729,7 @@ class TraktSync(_PluginBase):
 
                     elif item_type == "show":
                         show_data = item.get("show", {})
-                        result = self.__sync_show(show_data, False, history, source=list_source)
+                        result = self.__sync_show(show_data, history, source=list_source)
                         if result:
                             if result.get("is_new"):
                                 stats["shows_added"] += 1
