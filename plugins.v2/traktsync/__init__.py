@@ -291,7 +291,7 @@ class TraktSync(_PluginBase):
                                                             {'title': '仅电影', 'value': 'movie'},
                                                             {'title': '仅剧集', 'value': 'tv'}
                                                         ],
-                                                        'hint': '选择要同步的媒体类型',
+                                                        'hint': '仅对Watchlist生效，自定义列表全同步',
                                                         'persistent-hint': True
                                                     }
                                                 }]
@@ -361,10 +361,10 @@ class TraktSync(_PluginBase):
                                                         'variant': 'tonal',
                                                         'text': '同步设置说明：\n'
                                                                '• 同步周期：设置定时同步的执行周期，支持cron表达式\n'
-                                                               '• 同步类型：选择同步电影、剧集或全部\n'
+                                                               '• 同步类型：选择同步电影、剧集或全部（仅对Watchlist生效）\n'
                                                                '• 添加并启用订阅：开启后添加的订阅为激活状态(N)会触发搜索，关闭后为暂停状态(S)\n'
                                                                '• 搜索下载：开启后优先搜索并下载，失败时添加订阅（依赖于"添加并启用订阅"）\n'
-                                                               '• 自定义列表：输入Trakt自定义列表，通过工作流动作手动触发同步'
+                                                               '• 自定义列表：全同步电影和剧集，不受同步类型限制，支持多个列表（逗号分隔）'
                                                     }
                                                 }]
                                             }
@@ -1229,12 +1229,12 @@ class TraktSync(_PluginBase):
                 # 列表名称作为来源
                 list_source = f"{username}/{list_id}"
 
-                # 处理列表项
+                # 处理列表项（自定义列表全同步，不受同步类型限制）
                 for item in items:
                     try:
                         item_type = item.get("type")
 
-                        if item_type == "movie" and self._sync_type in ["all", "movie"]:
+                        if item_type == "movie":
                             movie_data = item.get("movie", {})
                             result = self.__sync_movie(movie_data, enable_download, history, source=list_source)
                             if result:
@@ -1244,7 +1244,7 @@ class TraktSync(_PluginBase):
                                     stats["movies_exists"] += 1
                                 history.append(result.get("history"))
 
-                        elif item_type == "show" and self._sync_type in ["all", "tv"]:
+                        elif item_type == "show":
                             show_data = item.get("show", {})
                             result = self.__sync_show(show_data, enable_download, history, source=list_source)
                             if result:
@@ -1255,7 +1255,7 @@ class TraktSync(_PluginBase):
                                 history.append(result.get("history"))
 
                         else:
-                            logger.debug(f"跳过项目类型: {item_type}")
+                            logger.debug(f"跳过未知项目类型: {item_type}")
 
                     except Exception as e:
                         logger.error(f"同步列表项失败: {str(e)}")
@@ -1838,14 +1838,17 @@ class TraktSync(_PluginBase):
 
             logger.info(f"获取到 {len(items)} 个列表项")
 
-            # 处理列表项
+            # 列表名称作为来源
+            list_source = f"{username}/{list_id}"
+
+            # 处理列表项（自定义列表全同步，不受同步类型限制）
             for item in items:
                 try:
                     item_type = item.get("type")
 
                     if item_type == "movie":
                         movie_data = item.get("movie", {})
-                        result = self.__sync_movie(movie_data, False, history)
+                        result = self.__sync_movie(movie_data, False, history, source=list_source)
                         if result:
                             if result.get("is_new"):
                                 stats["movies_added"] += 1
@@ -1855,7 +1858,7 @@ class TraktSync(_PluginBase):
 
                     elif item_type == "show":
                         show_data = item.get("show", {})
-                        result = self.__sync_show(show_data, False, history)
+                        result = self.__sync_show(show_data, False, history, source=list_source)
                         if result:
                             if result.get("is_new"):
                                 stats["shows_added"] += 1
