@@ -8,7 +8,7 @@ from app.core.config import settings
 from app.core.event import eventmanager, Event
 from app.log import logger
 from app.plugins import _PluginBase
-from app.schemas.types import EventType, NotificationType, MediaType
+from app.schemas.types import EventType, NotificationType, MediaType, SystemConfigKey
 from app.utils.http import RequestUtils
 from app.chain.subscribe import SubscribeChain
 from app.chain.download import DownloadChain
@@ -17,7 +17,6 @@ from app.helper.mediaserver import MediaServerHelper
 from app.core.metainfo import MetaInfo
 from app.db.systemconfig_oper import SystemConfigOper
 from app.db.subscribe_oper import SubscribeOper
-from app.schemas import SystemConfigKey
 
 
 class TraktSync(_PluginBase):
