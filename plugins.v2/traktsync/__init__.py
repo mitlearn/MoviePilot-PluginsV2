@@ -187,7 +187,7 @@ class TraktSync(_PluginBase):
                                     'component': 'VSwitch',
                                     'props': {
                                         'model': 'enabled',
-                                        'label': '启用插件',
+                                        'label': '启用插件'
                                     }
                                 }]
                             },
@@ -198,7 +198,7 @@ class TraktSync(_PluginBase):
                                     'component': 'VSwitch',
                                     'props': {
                                         'model': 'notify',
-                                        'label': '发送通知',
+                                        'label': '发送通知'
                                     }
                                 }]
                             },
@@ -209,7 +209,7 @@ class TraktSync(_PluginBase):
                                     'component': 'VSwitch',
                                     'props': {
                                         'model': 'onlyonce',
-                                        'label': '立即运行一次',
+                                        'label': '立即运行一次'
                                     }
                                 }]
                             },
@@ -222,7 +222,9 @@ class TraktSync(_PluginBase):
                             'style': {
                                 'margin-top': '8px',
                                 'margin-bottom': '16px'
-                            }
+                            },
+                            'stacked': True,
+                            'fixed-tabs': True
                         },
                         'content': [
                             {
@@ -264,20 +266,21 @@ class TraktSync(_PluginBase):
                                         'content': [
                                             {
                                                 'component': 'VCol',
-                                                'props': {'cols': 12, 'md': 4},
+                                                'props': {'cols': 12, 'md': 6},
                                                 'content': [{
                                                     'component': 'VCronField',
                                                     'props': {
                                                         'model': 'cron',
                                                         'label': '同步周期',
                                                         'placeholder': '如：0 8 * * *',
-                                                        'hint': '5位cron表达式，留空则默认每天执行一次'
+                                                        'hint': '5位cron表达式，留空则默认每天执行一次',
+                                                        'persistent-hint': True
                                                     }
                                                 }]
                                             },
                                             {
                                                 'component': 'VCol',
-                                                'props': {'cols': 12, 'md': 4},
+                                                'props': {'cols': 12, 'md': 6},
                                                 'content': [{
                                                     'component': 'VSelect',
                                                     'props': {
@@ -287,13 +290,20 @@ class TraktSync(_PluginBase):
                                                             {'title': '全部', 'value': 'all'},
                                                             {'title': '仅电影', 'value': 'movie'},
                                                             {'title': '仅剧集', 'value': 'tv'}
-                                                        ]
+                                                        ],
+                                                        'hint': '选择要同步的媒体类型',
+                                                        'persistent-hint': True
                                                     }
                                                 }]
                                             },
+                                        ]
+                                    },
+                                    {
+                                        'component': 'VRow',
+                                        'content': [
                                             {
                                                 'component': 'VCol',
-                                                'props': {'cols': 12, 'md': 4},
+                                                'props': {'cols': 12, 'md': 6},
                                                 'content': [{
                                                     'component': 'VSwitch',
                                                     'props': {
@@ -306,7 +316,7 @@ class TraktSync(_PluginBase):
                                             },
                                             {
                                                 'component': 'VCol',
-                                                'props': {'cols': 12, 'md': 4},
+                                                'props': {'cols': 12, 'md': 6},
                                                 'content': [{
                                                     'component': 'VSwitch',
                                                     'props': {
@@ -379,7 +389,7 @@ class TraktSync(_PluginBase):
                                         'content': [
                                             {
                                                 'component': 'VCol',
-                                                'props': {'cols': 12, 'md': 3},
+                                                'props': {'cols': 12, 'md': 4},
                                                 'content': [{
                                                     'component': 'VSwitch',
                                                     'props': {
@@ -392,7 +402,7 @@ class TraktSync(_PluginBase):
                                             },
                                             {
                                                 'component': 'VCol',
-                                                'props': {'cols': 12, 'md': 9},
+                                                'props': {'cols': 12, 'md': 8},
                                                 'content': []
                                             }
                                         ]
@@ -837,10 +847,17 @@ class TraktSync(_PluginBase):
             title = history.get("title")
             poster = history.get("poster")
             mtype = history.get("type")
+            source = history.get("source", "watchlist")
             time_str = history.get("time")
             tmdbid = history.get("tmdbid")
             action = "下载" if history.get("action") == "download" else "添加" if history.get("action") == "subscribe" \
                 else "存在" if history.get("action") == "exist" else history.get("action")
+
+            # 根据source显示类型：watchlist显示媒体类型，自定义列表显示列表名称
+            if source == "watchlist":
+                display_type = mtype
+            else:
+                display_type = source
             contents.append(
                 {
                     'component': 'VCard',
@@ -907,7 +924,7 @@ class TraktSync(_PluginBase):
                                             'props': {
                                                 'class': 'pa-0 px-2'
                                             },
-                                            'text': f'类型：{mtype}'
+                                            'text': f'类型：{display_type}'
                                         },
                                         {
                                             'component': 'VCardText',
@@ -1150,7 +1167,7 @@ class TraktSync(_PluginBase):
                 for item in movies:
                     try:
                         movie_data = item.get("movie", {})
-                        result = self.__sync_movie(movie_data, enable_download, history)
+                        result = self.__sync_movie(movie_data, enable_download, history, source="watchlist")
                         if result:
                             if result.get("is_new"):
                                 stats["movies_added"] += 1
@@ -1170,7 +1187,7 @@ class TraktSync(_PluginBase):
                 for item in shows:
                     try:
                         show_data = item.get("show", {})
-                        result = self.__sync_show(show_data, enable_download, history)
+                        result = self.__sync_show(show_data, enable_download, history, source="watchlist")
                         if result:
                             if result.get("is_new"):
                                 stats["shows_added"] += 1
@@ -1180,6 +1197,68 @@ class TraktSync(_PluginBase):
                             history.append(result.get("history"))
                     except Exception as e:
                         logger.error(f"同步剧集失败: {str(e)}")
+                        stats["errors"] += 1
+
+        # 同步自定义列表
+        if self._custom_lists:
+            logger.info("开始同步Trakt自定义列表...")
+            list_configs = self._custom_lists.split(",")
+
+            for list_config in list_configs:
+                list_config = list_config.strip()
+                if not list_config:
+                    continue
+
+                # 解析列表配置
+                username, list_id = self.__parse_list_config(list_config)
+                if not username or not list_id:
+                    logger.error(f"无效的列表配置: {list_config}")
+                    stats["errors"] += 1
+                    continue
+
+                logger.info(f"同步自定义列表: {username}/{list_id}")
+
+                # 获取列表内容
+                items = self.__get_custom_list_items(username, list_id)
+                if not items:
+                    logger.warning(f"未获取到列表内容: {username}/{list_id}")
+                    continue
+
+                logger.info(f"获取到 {len(items)} 个列表项")
+
+                # 列表名称作为来源
+                list_source = f"{username}/{list_id}"
+
+                # 处理列表项
+                for item in items:
+                    try:
+                        item_type = item.get("type")
+
+                        if item_type == "movie" and self._sync_type in ["all", "movie"]:
+                            movie_data = item.get("movie", {})
+                            result = self.__sync_movie(movie_data, enable_download, history, source=list_source)
+                            if result:
+                                if result.get("is_new"):
+                                    stats["movies_added"] += 1
+                                else:
+                                    stats["movies_exists"] += 1
+                                history.append(result.get("history"))
+
+                        elif item_type == "show" and self._sync_type in ["all", "tv"]:
+                            show_data = item.get("show", {})
+                            result = self.__sync_show(show_data, enable_download, history, source=list_source)
+                            if result:
+                                if result.get("is_new"):
+                                    stats["shows_added"] += 1
+                                else:
+                                    stats["shows_exists"] += 1
+                                history.append(result.get("history"))
+
+                        else:
+                            logger.debug(f"跳过项目类型: {item_type}")
+
+                    except Exception as e:
+                        logger.error(f"同步列表项失败: {str(e)}")
                         stats["errors"] += 1
 
         # 更新上次同步时间
@@ -1367,13 +1446,14 @@ class TraktSync(_PluginBase):
         url = f"{self._api_base}/users/{username}/lists/{list_id}/items"
         return self.__make_trakt_api_call(url, f"自定义列表 {username}/{list_id}")
 
-    def __sync_media(self, media_data: dict, media_type: MediaType, enable_download: bool = False, history: List[dict] = None) -> Optional[dict]:
+    def __sync_media(self, media_data: dict, media_type: MediaType, enable_download: bool = False, history: List[dict] = None, source: str = "watchlist") -> Optional[dict]:
         """
         同步单个媒体（电影或剧集）
         :param media_data: 媒体数据
         :param media_type: 媒体类型（MediaType.MOVIE 或 MediaType.TV）
         :param enable_download: 是否启用搜索下载（远程命令强制）
         :param history: 历史记录列表
+        :param source: 来源标识（watchlist 或自定义列表名称）
         :return: 返回包含is_new和history的字典，或None
         """
         media_type_name = "电影" if media_type == MediaType.MOVIE else "剧集"
@@ -1438,6 +1518,7 @@ class TraktSync(_PluginBase):
             "poster": mediainfo.get_poster_image(),
             "overview": mediainfo.overview,
             "tmdbid": tmdb_id,
+            "source": source,  # 来源：watchlist 或自定义列表名称
             "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 
@@ -1446,13 +1527,13 @@ class TraktSync(_PluginBase):
             "history": history_item
         }
 
-    def __sync_movie(self, movie_data: dict, enable_download: bool = False, history: List[dict] = None) -> Optional[dict]:
+    def __sync_movie(self, movie_data: dict, enable_download: bool = False, history: List[dict] = None, source: str = "watchlist") -> Optional[dict]:
         """同步单个电影（向后兼容方法）"""
-        return self.__sync_media(movie_data, MediaType.MOVIE, enable_download, history)
+        return self.__sync_media(movie_data, MediaType.MOVIE, enable_download, history, source)
 
-    def __sync_show(self, show_data: dict, enable_download: bool = False, history: List[dict] = None) -> Optional[dict]:
+    def __sync_show(self, show_data: dict, enable_download: bool = False, history: List[dict] = None, source: str = "watchlist") -> Optional[dict]:
         """同步单个剧集（向后兼容方法）"""
-        return self.__sync_media(show_data, MediaType.TV, enable_download, history)
+        return self.__sync_media(show_data, MediaType.TV, enable_download, history, source)
 
     def __is_subscribed(self, tmdb_id: int, mtype: MediaType) -> bool:
         """

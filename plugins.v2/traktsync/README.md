@@ -7,13 +7,16 @@ TraktSync 是为 MoviePilot 开发的 Trakt.tv 想看列表同步插件。它可
 ### 主要功能
 
 - ✅ 同步 Trakt Watchlist 电影和剧集
+- ✅ 同步 Trakt 自定义列表（Custom Lists）
 - ✅ 自动识别 TMDB 媒体信息
 - ✅ 自动去重（检查媒体库和订阅列表）
 - ✅ 支持定时自动同步（Cron）
-- ✅ 支持远程命令手动触发
+- ✅ 支持远程命令和工作流触发
 - ✅ 可选自动搜索下载功能
+- ✅ 详情页展示同步历史记录
+- ✅ 订阅状态控制（激活/暂停）
 - ✅ 系统通知支持
-- ✅ 使用 MoviePilot 内置代理
+- ✅ 可选使用系统代理
 
 ---
 
@@ -140,16 +143,33 @@ python get_trakt_token.py
 3. 找到 **Trakt想看** 插件，点击 **设置**
 4. 填写以下配置：
 
+#### 基础设置
+
 | 配置项 | 说明 | 必填 |
 |--------|------|------|
 | **启用插件** | 是否启用插件 | 是 |
 | **发送通知** | 同步完成后是否发送通知 | 否 |
 | **立即运行一次** | 保存配置后立即执行一次同步 | 否 |
-| **搜索下载** | 是否自动搜索并下载资源（关闭则仅添加订阅） | 否 |
-| **执行周期** | Cron 表达式，留空则默认每天 8:00 执行 | 否 |
-| **Trakt Client ID** | 第一步获取的 Client ID | 是 |
-| **Trakt Client Secret** | 第一步获取的 Client Secret | 是 |
-| **Refresh Token** | 第二步获取的 Refresh Token | 是 |
+
+#### 同步设置
+
+| 配置项 | 说明 | 必填 |
+|--------|------|------|
+| **同步周期** | Cron 表达式，留空则默认每天 8:00 执行 | 否 |
+| **同步类型** | 选择同步电影、剧集或全部 | 否 |
+| **添加并启用订阅** | 开启后添加的订阅为激活状态，关闭后为暂停状态 | 否 |
+| **搜索下载** | 是否自动搜索并下载资源（需要先启用订阅） | 否 |
+| **自定义列表** | Trakt自定义列表，格式：username/list_id 或 URL，多个用逗号分隔 | 否 |
+
+#### Trakt 配置
+
+| 配置项 | 说明 | 必填 |
+|--------|------|------|
+| **使用代理** | 是否使用系统代理访问 Trakt API | 否 |
+| **Client ID** | 第一步获取的 Client ID | 是 |
+| **Client Secret** | 第一步获取的 Client Secret | 是 |
+| **授权码** | 授权后获取的 Authorization Code，填写后自动获取 Token | 否 |
+| **Refresh Token** | 通过授权码自动获取，或手动填写 | 是 |
 
 5. 点击 **保存**
 
@@ -185,13 +205,16 @@ python get_trakt_token.py
 
 ## 远程命令
 
-插件注册了两个远程命令，可以通过聊天工具（Telegram、微信等）或 MoviePilot 命令行触发：
+插件注册了三个远程命令，可以通过聊天工具（Telegram、微信等）或 MoviePilot 命令行触发：
 
 ### `/trakt_sync`
 
-**功能**: 立即同步 Trakt 想看列表
+**功能**: 立即同步 Trakt 想看列表（Watchlist）
 
-**行为**: 根据插件配置决定是否搜索下载
+**行为**:
+- 同步 Watchlist 电影和剧集
+- 如果配置了自定义列表，也会一起同步
+- 根据插件配置决定是否搜索下载
 
 **示例**:
 ```
@@ -202,16 +225,140 @@ python get_trakt_token.py
 
 **功能**: 同步并强制开启搜索下载
 
-**行为**: 无论插件配置如何，都会尝试搜索并下载资源
+**行为**:
+- 同步 Watchlist 和自定义列表
+- 无论插件配置如何，都会尝试搜索并下载资源
 
 **示例**:
 ```
 /trakt_download
 ```
 
+### `/trakt_custom_lists`
+
+**功能**: 仅同步自定义列表
+
+**行为**:
+- 仅同步配置的自定义列表，不同步 Watchlist
+- 根据插件配置决定是否搜索下载
+
+**示例**:
+```
+/trakt_custom_lists
+```
+
+---
+
+## 工作流支持
+
+插件支持作为工作流动作使用，可以在特定条件下触发同步：
+
+### 工作流动作
+
+| 动作名称 | 功能 | 说明 |
+|---------|------|------|
+| **同步Trakt想看** | 同步 Watchlist 和自定义列表 | 根据配置决定是否搜索下载 |
+| **同步并下载Trakt想看** | 强制开启搜索下载同步 | 无论配置如何都尝试下载 |
+| **同步Trakt自定义列表** | 仅同步自定义列表 | 不同步 Watchlist |
+
+### 使用示例
+
+在 MoviePilot 工作流编辑器中：
+
+1. 创建新工作流或编辑现有工作流
+2. 添加触发条件（如：定时触发、事件触发等）
+3. 添加动作 → 选择 **TraktSync** 插件
+4. 选择需要的动作类型
+5. 保存并启用工作流
+
+### API 端点
+
+插件还提供了 HTTP API 端点，可以通过 POST 请求触发：
+
+```bash
+# 同步 Watchlist
+curl -X POST "http://your-moviepilot/api/v1/plugin/TraktSync/sync" \
+  -H "Content-Type: application/json" \
+  -d '{"apikey": "your_api_key"}'
+
+# 同步并下载
+curl -X POST "http://your-moviepilot/api/v1/plugin/TraktSync/sync_download" \
+  -H "Content-Type: application/json" \
+  -d '{"apikey": "your_api_key"}'
+
+# 同步自定义列表
+curl -X POST "http://your-moviepilot/api/v1/plugin/TraktSync/sync_custom_lists" \
+  -H "Content-Type: application/json" \
+  -d '{"apikey": "your_api_key"}'
+```
+
+详细的 API 文档请参考 [API_Document.md](API_Document.md)。
+
+---
+
+## 自定义列表功能
+
+### 配置格式
+
+自定义列表支持两种配置格式：
+
+#### 格式一：username/list_id
+
+```
+username/my-favorite-movies
+```
+
+#### 格式二：完整 URL
+
+```
+https://trakt.tv/users/username/lists/my-favorite-movies
+```
+
+#### 多个列表
+
+使用逗号分隔多个列表：
+
+```
+username/list1,username/list2,https://trakt.tv/users/username/lists/list3
+```
+
+### 如何获取列表信息
+
+1. 访问你的 Trakt.tv 个人主页
+2. 进入 **Lists** 标签页
+3. 选择要同步的列表
+4. 查看 URL，格式为：`https://trakt.tv/users/{username}/lists/{list_id}`
+5. 复制 URL 或提取 `username/list_id` 填入插件配置
+
+### 同步行为
+
+- 自定义列表会与 Watchlist 一起同步（使用 `/trakt_sync` 或定时任务时）
+- 可以单独同步自定义列表（使用 `/trakt_custom_lists` 命令或工作流动作）
+- 自定义列表的项目在详情页会显示列表名称，而不是"电影"或"电视剧"
+
+### 使用场景
+
+- **分类管理**: 创建不同主题的列表（如：科幻电影、经典剧集）
+- **共享列表**: 同步其他用户公开的列表
+- **推荐收藏**: 从网上找到的 Trakt 推荐列表
+- **临时关注**: 某些特定主题的临时列表
+
 ---
 
 ## 同步逻辑说明
+
+### 同步流程
+
+```
+1. 同步 Watchlist 电影（如果启用）
+2. 同步 Watchlist 剧集（如果启用）
+3. 同步自定义列表（如果配置）
+   ├─ 解析列表配置（支持 username/list_id 或 URL）
+   ├─ 获取列表内容
+   └─ 根据同步类型过滤电影/剧集
+4. 保存同步历史
+5. 发送通知（如果启用）
+```
 
 ### 去重机制
 
@@ -219,7 +366,7 @@ python get_trakt_token.py
 
 1. **媒体库已存在**: 通过 TMDB ID 检查媒体服务器（Plex/Emby/Jellyfin）
 2. **已在订阅列表**: 检查 MoviePilot 订阅数据库
-3. **已在下载队列**: 检查下载器（qBittorrent/Transmission 等）
+3. **已在同步历史**: 检查本次同步是否已处理过该 TMDB ID
 
 满足以上任一条件，将跳过该媒体。
 
@@ -297,20 +444,66 @@ python get_trakt_token.py
 </details>
 
 <details>
-<summary><b>Q: 支持同步已看记录吗？</b></summary>
+<summary><b>Q: 自定义列表是什么？如何使用？</b></summary>
 
-**A**: 当前版本（v0.1.0）仅支持同步 Watchlist，不支持同步观看记录。后续版本可能会添加。
+**A**: 自定义列表是 Trakt.tv 上用户创建的个人列表，可以按主题分类管理媒体。
+
+**使用步骤**:
+1. 在 Trakt.tv 上创建或找到想要同步的列表
+2. 获取列表的 username/list_id 或完整 URL
+3. 填入插件配置的"自定义列表"字段
+4. 多个列表用逗号分隔
+
+**示例**:
+```
+myusername/sci-fi-movies,myusername/classic-tv
+```
+
+或使用完整 URL：
+```
+https://trakt.tv/users/myusername/lists/sci-fi-movies
+```
 </details>
 
 <details>
-<summary><b>Q: 如何使用代理？</b></summary>
+<summary><b>Q: 自定义列表何时同步？</b></summary>
 
-**A**: 插件自动使用 MoviePilot 系统设置中配置的代理，无需单独配置。
+**A**: 自定义列表的同步时机：
+
+1. **定时任务**: 会与 Watchlist 一起自动同步
+2. **`/trakt_sync` 命令**: 会同时同步 Watchlist 和自定义列表
+3. **`/trakt_custom_lists` 命令**: 仅同步自定义列表，不同步 Watchlist
+4. **工作流动作**: 根据选择的动作类型决定
+</details>
+
+<details>
+<summary><b>Q: 如何在详情页区分 Watchlist 和自定义列表？</b></summary>
+
+**A**: 在插件详情页的同步历史中：
+- Watchlist 的项目类型显示为"电影"或"电视剧"
+- 自定义列表的项目类型显示为列表名称（如 "myusername/sci-fi-movies"）
+</details>
+
+<details>
+<summary><b>Q: 支持同步已看记录吗？</b></summary>
+
+**A**: 当前版本仅支持同步 Watchlist 和自定义列表，不支持同步观看记录。
+</details>
+
+<details>
+<summary><b>Q: 如何使用代理访问 Trakt？</b></summary>
+
+**A**: 插件提供了代理开关，可以选择是否使用系统代理。
 
 **配置步骤**:
-1. 进入 MoviePilot **设置 → 系统 → 网络**
-2. 配置代理服务器地址
-3. 保存后插件会自动使用该代理访问 Trakt API
+1. 进入 MoviePilot **设置 → 系统 → 网络**，配置代理服务器地址
+2. 在插件 **Trakt配置** 标签页，开启"使用代理"开关
+3. 保存后插件会使用系统代理访问 Trakt API
+
+**注意**:
+- 默认关闭代理（直连访问）
+- 如果 Trakt 被墙或访问速度慢，建议开启代理
+- 系统代理未配置时，开启开关无效
 </details>
 
 <details>
@@ -392,12 +585,6 @@ python get_trakt_token.py
 
 ---
 
-## 工作流支持
-
-当前版本暂不支持作为工作流节点，后续版本会添加。
-
----
-
 ## 技术细节
 
 ### 依赖的 MoviePilot 组件
@@ -412,12 +599,23 @@ python get_trakt_token.py
 
 ### API 调用流程
 
+#### Watchlist 同步流程
 ```
-1. refresh_access_token() → 刷新 Token
-2. get_watchlist_movies() → 获取电影列表
-3. get_watchlist_shows() → 获取剧集列表
-4. recognize_media() → 识别媒体信息
-5. add() / search_and_download() → 添加订阅或搜索下载
+1. __refresh_access_token() → 刷新 Token
+2. __get_watchlist_movies() → 获取电影列表
+3. __get_watchlist_shows() → 获取剧集列表
+4. recognize_media() → 识别媒体信息（每个项目）
+5. __search_and_download_with_action() → 搜索下载（如果启用）
+   或 __add_subscribe() → 添加订阅
+```
+
+#### 自定义列表同步流程
+```
+1. __refresh_access_token() → 刷新 Token
+2. __parse_list_config() → 解析列表配置
+3. __get_custom_list_items() → 获取列表内容
+4. 根据项目类型（movie/show）调用相应同步方法
+5. 处理逻辑同 Watchlist
 ```
 
 ---
@@ -438,15 +636,19 @@ traktsync/
 | 方法 | 功能 |
 |------|------|
 | `init_plugin(config)` | 初始化插件配置 |
-| `sync()` | 核心同步逻辑 |
+| `sync()` | 核心同步逻辑（Watchlist + 自定义列表） |
+| `sync_custom_lists()` | 仅同步自定义列表 |
 | `__refresh_access_token()` | 刷新 Access Token |
+| `__make_trakt_api_call()` | 统一的 Trakt API 调用方法 |
 | `__get_watchlist_movies()` | 获取电影 Watchlist |
 | `__get_watchlist_shows()` | 获取剧集 Watchlist |
-| `__sync_movie()` | 同步单个电影 |
-| `__sync_show()` | 同步单个剧集 |
+| `__get_custom_list_items()` | 获取自定义列表内容 |
+| `__sync_media()` | 同步单个媒体（统一方法） |
+| `__sync_movie()` | 同步单个电影（兼容方法） |
+| `__sync_show()` | 同步单个剧集（兼容方法） |
 | `__add_subscribe()` | 添加订阅 |
-| `__search_and_download_movie()` | 搜索并下载电影 |
-| `__search_and_download_show()` | 搜索并下载剧集 |
+| `__search_and_download_with_action()` | 搜索并下载（统一方法） |
+| `__parse_list_config()` | 解析列表配置（URL 或 username/list_id） |
 
 ---
 
@@ -480,6 +682,30 @@ traktsync/
 ---
 
 ## 📖 更新日志
+
+### v0.4.0 (2024-02-16)
+
+- ✅ 新增工作流动作：同步Trakt自定义列表
+- ✅ 支持同步 Trakt 自定义列表（Custom Lists）
+- ✅ 自定义列表与 Watchlist 统一同步
+- ✅ 详情页区分显示来源（Watchlist 或列表名称）
+- ✅ 新增远程命令：`/trakt_custom_lists`
+- ✅ 新增 API 端点：同步自定义列表
+- ✅ 代码优化：合并重复方法，减少约200行代码
+- ✅ 新增代理开关：可选择是否使用系统代理
+
+### v0.3.0 (2024-02-15)
+
+- ✅ 新增详情页：展示同步历史记录
+- ✅ 新增订阅状态控制：支持激活/暂停状态
+- ✅ 搜索下载功能增强
+- ✅ 操作类型优化：区分下载、添加、已存在
+
+### v0.2.0 (2024-02-15)
+
+- ✅ 新增详情页展示同步历史
+- ✅ 修复搜索下载逻辑
+- ✅ 支持删除历史记录
 
 ### v0.1.0 (2024-02-15)
 
