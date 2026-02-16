@@ -37,12 +37,15 @@
     "name": "Trakt想看",
     "description": "同步Trakt想看列表，自动添加订阅或搜索下载。",
     "labels": "订阅,trakt,同步",
-    "version": "0.1.0",
+    "version": "0.4.0",
     "icon": "Trakt_A.png",
     "author": "Claude",
     "level": 1,
     "history": {
-      "v0.1.0": "初始版本；支持同步Trakt Watchlist电影和剧集"
+      "v0.1.0": "初始版本；支持同步Trakt Watchlist电影和剧集",
+      "v0.2.0": "新增详情页展示同步历史；修复搜索下载逻辑；支持删除历史记录",
+      "v0.3.0": "新增详情页；新增订阅状态控制；搜索下载功能；操作类型优化",
+      "v0.4.0": "新增工作流动作：同步Trakt自定义列表"
     }
   }
 }

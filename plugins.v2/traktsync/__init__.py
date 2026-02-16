@@ -24,7 +24,7 @@ class TraktSync(_PluginBase):
     plugin_name = "Trakt想看"
     plugin_desc = "同步Trakt想看数据，自动添加订阅。"
     plugin_icon = "Trakt_A.png"
-    plugin_version = "0.3.0"
+    plugin_version = "0.4.0"
     plugin_author = "Claude"
     author_url = "https://github.com/"
     plugin_config_prefix = "traktsync_"
@@ -58,6 +58,8 @@ class TraktSync(_PluginBase):
     _sync_type: str = "all"  # 同步类型：all/movie/tv
     _last_sync_time: str = ""  # 上次同步时间
     _tabs: str = "sync_tab"  # 当前标签页
+    _custom_lists: str = ""  # 自定义列表（格式：username/list_id，多个用逗号分隔）
+    _use_proxy: bool = False  # 使用系统代理访问Trakt API
 
     def init_plugin(self, config: dict = None):
         """初始化插件配置"""
@@ -81,9 +83,17 @@ class TraktSync(_PluginBase):
             self._access_token = config.get("access_token", "")
             self._add_and_enable = config.get("add_and_enable", True)
             self._auto_download = config.get("auto_download", False)
+
+            # 逻辑约束：搜索下载依赖于添加并启用订阅
+            if not self._add_and_enable and self._auto_download:
+                self._auto_download = False
+                logger.info("已自动关闭搜索下载功能（需要先启用订阅）")
+
             self._sync_type = config.get("sync_type", "all")
             self._last_sync_time = config.get("last_sync_time", "")
             self._tabs = config.get("_tabs", "sync_tab")
+            self._custom_lists = config.get("custom_lists", "")
+            self._use_proxy = config.get("use_proxy", False)
 
             # 解析 token 过期时间
             token_expires_str = config.get("token_expires_at")
@@ -155,6 +165,7 @@ class TraktSync(_PluginBase):
             "sync_type": self._sync_type,
             "last_sync_time": self._last_sync_time,
             "_tabs": self._tabs,
+            "custom_lists": self._custom_lists,
         }
         if self._token_expires_at:
             config["token_expires_at"] = self._token_expires_at.isoformat()
@@ -211,9 +222,7 @@ class TraktSync(_PluginBase):
                             'style': {
                                 'margin-top': '8px',
                                 'margin-bottom': '16px'
-                            },
-                            'stacked': False,
-                            'fixed-tabs': False
+                            }
                         },
                         'content': [
                             {
@@ -290,7 +299,7 @@ class TraktSync(_PluginBase):
                                                     'props': {
                                                         'model': 'add_and_enable',
                                                         'label': '添加并启用订阅',
-                                                        'hint': '开启后订阅为激活状态，关闭后为暂停状态',
+                                                        'hint': '开启后添加的订阅为激活状态，关闭后为暂停状态',
                                                         'persistent-hint': True
                                                     }
                                                 }]
@@ -303,12 +312,30 @@ class TraktSync(_PluginBase):
                                                     'props': {
                                                         'model': 'auto_download',
                                                         'label': '搜索下载',
-                                                        'hint': '开启后优先搜索下载，仅在启用订阅时可用',
-                                                        'persistent-hint': True,
-                                                        'disabled': '!add_and_enable'
+                                                        'hint': '开启后优先搜索下载（需先启用"添加并启用订阅"）',
+                                                        'persistent-hint': True
                                                     }
                                                 }]
                                             },
+                                        ]
+                                    },
+                                    {
+                                        'component': 'VRow',
+                                        'content': [
+                                            {
+                                                'component': 'VCol',
+                                                'props': {'cols': 12},
+                                                'content': [{
+                                                    'component': 'VTextField',
+                                                    'props': {
+                                                        'model': 'custom_lists',
+                                                        'label': '自定义列表',
+                                                        'placeholder': '如：username/list_id 或 https://trakt.tv/users/username/lists/list_id',
+                                                        'hint': '支持Trakt自定义列表URL或username/list_id格式，多个用逗号分隔',
+                                                        'persistent-hint': True
+                                                    }
+                                                }]
+                                            }
                                         ]
                                     },
                                     {
@@ -325,8 +352,9 @@ class TraktSync(_PluginBase):
                                                         'text': '同步设置说明：\n'
                                                                '• 同步周期：设置定时同步的执行周期，支持cron表达式\n'
                                                                '• 同步类型：选择同步电影、剧集或全部\n'
-                                                               '• 添加并启用订阅：开启后订阅为激活状态(N)会触发搜索，关闭后为暂停状态(S)\n'
-                                                               '• 搜索下载：开启后优先搜索并下载，失败时添加订阅（仅在启用订阅时可用）'
+                                                               '• 添加并启用订阅：开启后添加的订阅为激活状态(N)会触发搜索，关闭后为暂停状态(S)\n'
+                                                               '• 搜索下载：开启后优先搜索并下载，失败时添加订阅（依赖于"添加并启用订阅"）\n'
+                                                               '• 自定义列表：输入Trakt自定义列表，通过工作流动作手动触发同步'
                                                     }
                                                 }]
                                             }
@@ -348,6 +376,29 @@ class TraktSync(_PluginBase):
                                                 'margin-top': '0px'
                                             }
                                         },
+                                        'content': [
+                                            {
+                                                'component': 'VCol',
+                                                'props': {'cols': 12, 'md': 3},
+                                                'content': [{
+                                                    'component': 'VSwitch',
+                                                    'props': {
+                                                        'model': 'use_proxy',
+                                                        'label': '使用代理',
+                                                        'hint': '开启后使用系统代理访问Trakt API',
+                                                        'persistent-hint': True
+                                                    }
+                                                }]
+                                            },
+                                            {
+                                                'component': 'VCol',
+                                                'props': {'cols': 12, 'md': 9},
+                                                'content': []
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        'component': 'VRow',
                                         'content': [
                                             {
                                                 'component': 'VCol',
@@ -445,10 +496,12 @@ class TraktSync(_PluginBase):
             "sync_type": "all",
             "add_and_enable": True,
             "auto_download": False,
+            "use_proxy": False,
             "client_id": "",
             "client_secret": "",
             "auth_code": "",
             "refresh_token": "",
+            "custom_lists": "",
             "_tabs": "sync_tab"
         }
 
@@ -944,6 +997,15 @@ class TraktSync(_PluginBase):
                 "data": {
                     "action": "trakt_download"
                 }
+            },
+            {
+                "cmd": "/trakt_custom_lists",
+                "event": EventType.PluginAction,
+                "desc": "同步Trakt自定义列表",
+                "category": "订阅",
+                "data": {
+                    "action": "trakt_custom_lists"
+                }
             }
         ]
 
@@ -956,9 +1018,26 @@ class TraktSync(_PluginBase):
                 return
 
             action = event_data.get("action")
-            if action not in ["trakt_sync", "trakt_download"]:
+            if action not in ["trakt_sync", "trakt_download", "trakt_custom_lists"]:
                 return
 
+            # 自定义列表同步
+            if action == "trakt_custom_lists":
+                logger.info(f"收到命令，开始执行Trakt自定义列表同步 ...")
+                self.post_message(
+                    channel=event_data.get("channel"),
+                    title="开始同步Trakt自定义列表 ...",
+                    userid=event_data.get("user")
+                )
+                self.sync_custom_lists()
+                self.post_message(
+                    channel=event.event_data.get("channel"),
+                    title="同步Trakt自定义列表完成！",
+                    userid=event.event_data.get("user")
+                )
+                return
+
+            # Watchlist同步
             logger.info(f"收到命令，开始执行Trakt想看同步 ...")
             self.post_message(
                 channel=event_data.get("channel"),
@@ -993,12 +1072,35 @@ class TraktSync(_PluginBase):
                 "summary": "触发Trakt想看同步并下载"
             },
             {
+                "path": "/sync_custom_lists",
+                "endpoint": self.api_sync_custom_lists,
+                "methods": ["POST"],
+                "summary": "触发Trakt自定义列表同步"
+            },
+            {
                 "path": "/delete_history",
                 "endpoint": self.delete_history,
                 "methods": ["GET"],
                 "summary": "删除Trakt同步历史记录"
             }
         ]
+
+    def __init_sync_stats(self) -> dict:
+        """初始化同步统计数据"""
+        return {
+            "movies_added": 0,
+            "shows_added": 0,
+            "movies_exists": 0,
+            "shows_exists": 0,
+            "errors": 0
+        }
+
+    def __get_proxies(self) -> Optional[dict]:
+        """
+        获取代理配置
+        :return: 代理配置字典，如果不使用代理则返回None
+        """
+        return settings.PROXY if self._use_proxy else None
 
     def stop_service(self):
         """停止服务"""
@@ -1035,13 +1137,7 @@ class TraktSync(_PluginBase):
         history: List[dict] = self.get_data('history') or []
 
         # 统计数据
-        stats = {
-            "movies_added": 0,
-            "shows_added": 0,
-            "movies_exists": 0,
-            "shows_exists": 0,
-            "errors": 0
-        }
+        stats = self.__init_sync_stats()
 
         # 远程命令可强制启用搜索下载
         enable_download = force_download
@@ -1116,7 +1212,7 @@ class TraktSync(_PluginBase):
             # 发起 token 请求
             response = RequestUtils(
                 headers={"Content-Type": "application/json"},
-                proxies=settings.PROXY
+                proxies=self.__get_proxies()
             ).post_res(
                 url=self._oauth_url,
                 json={
@@ -1167,7 +1263,7 @@ class TraktSync(_PluginBase):
             # 发起 token refresh 请求
             response = RequestUtils(
                 headers={"Content-Type": "application/json"},
-                proxies=settings.PROXY  # 使用系统代理
+                proxies=self.__get_proxies()
             ).post_res(
                 url=self._oauth_url,
                 json={
@@ -1225,10 +1321,12 @@ class TraktSync(_PluginBase):
                 )
             return False
 
-    def __get_watchlist_movies(self) -> Optional[List[dict]]:
+    def __make_trakt_api_call(self, url: str, desc: str) -> Optional[List[dict]]:
         """
-        获取Trakt想看电影列表
-        :return: 电影列表
+        统一的Trakt API调用方法
+        :param url: API URL
+        :param desc: 描述（用于日志）
+        :return: API响应数据
         """
         try:
             response = RequestUtils(
@@ -1238,197 +1336,123 @@ class TraktSync(_PluginBase):
                     "trakt-api-key": self._client_id,
                     "Authorization": f"Bearer {self._access_token}"
                 },
-                proxies=settings.PROXY  # 使用系统代理
-            ).get_res(url=self._watchlist_movies_url)
+                proxies=self.__get_proxies()
+            ).get_res(url=url)
 
             if not response or response.status_code != 200:
-                logger.error(f"获取想看电影失败: {response.status_code if response else 'No response'}")
+                logger.error(f"获取{desc}失败: {response.status_code if response else 'No response'}")
                 return None
 
             return response.json()
 
         except Exception as e:
-            logger.error(f"获取想看电影异常: {str(e)}")
+            logger.error(f"获取{desc}异常: {str(e)}")
             return None
+
+    def __get_watchlist_movies(self) -> Optional[List[dict]]:
+        """获取Trakt想看电影列表"""
+        return self.__make_trakt_api_call(self._watchlist_movies_url, "想看电影")
 
     def __get_watchlist_shows(self) -> Optional[List[dict]]:
+        """获取Trakt想看剧集列表"""
+        return self.__make_trakt_api_call(self._watchlist_shows_url, "想看剧集")
+
+    def __get_custom_list_items(self, username: str, list_id: str) -> Optional[List[dict]]:
         """
-        获取Trakt想看剧集列表
-        :return: 剧集列表
+        获取Trakt自定义列表内容
+        :param username: Trakt用户名
+        :param list_id: 列表ID或slug
+        :return: 列表项
         """
-        try:
-            response = RequestUtils(
-                headers={
-                    "Content-Type": "application/json",
-                    "trakt-api-version": self._api_version,
-                    "trakt-api-key": self._client_id,
-                    "Authorization": f"Bearer {self._access_token}"
-                },
-                proxies=settings.PROXY  # 使用系统代理
-            ).get_res(url=self._watchlist_shows_url)
+        url = f"{self._api_base}/users/{username}/lists/{list_id}/items"
+        return self.__make_trakt_api_call(url, f"自定义列表 {username}/{list_id}")
 
-            if not response or response.status_code != 200:
-                logger.error(f"获取想看剧集失败: {response.status_code if response else 'No response'}")
-                return None
+    def __sync_media(self, media_data: dict, media_type: MediaType, enable_download: bool = False, history: List[dict] = None) -> Optional[dict]:
+        """
+        同步单个媒体（电影或剧集）
+        :param media_data: 媒体数据
+        :param media_type: 媒体类型（MediaType.MOVIE 或 MediaType.TV）
+        :param enable_download: 是否启用搜索下载（远程命令强制）
+        :param history: 历史记录列表
+        :return: 返回包含is_new和history的字典，或None
+        """
+        media_type_name = "电影" if media_type == MediaType.MOVIE else "剧集"
+        title = media_data.get("title")
+        year = media_data.get("year")
+        ids = media_data.get("ids", {})
+        tmdb_id = ids.get("tmdb")
 
-            return response.json()
-
-        except Exception as e:
-            logger.error(f"获取想看剧集异常: {str(e)}")
+        if not tmdb_id:
+            logger.warning(f"{media_type_name} {title} ({year}) 缺少TMDB ID，跳过")
             return None
+
+        # 检查是否已处理过
+        if history and tmdb_id in [h.get("tmdbid") for h in history]:
+            logger.info(f"{media_type_name} {title} ({year}) [TMDB: {tmdb_id}] 已处理过")
+            return None
+
+        logger.info(f"处理{media_type_name}: {title} ({year}) [TMDB: {tmdb_id}]")
+
+        # 识别媒体信息
+        meta = MetaInfo(title)
+        meta.year = str(year) if year else None
+        meta.type = media_type
+
+        mediainfo = self.chain.recognize_media(meta=meta, tmdbid=tmdb_id)
+        if not mediainfo:
+            logger.error(f"无法识别{media_type_name}: {title} ({year})")
+            return None
+
+        # 检查是否已存在
+        downloadchain = DownloadChain()
+        exist_flag, no_exists = downloadchain.get_no_exists_info(meta=meta, mediainfo=mediainfo)
+
+        if exist_flag:
+            exist_msg = "媒体库中已存在" if media_type == MediaType.MOVIE else "媒体库中已完整"
+            logger.info(f'{mediainfo.title_year} {exist_msg}')
+            action = "exist"
+            is_new = False
+        elif self.__is_subscribed(tmdb_id, media_type):
+            logger.info(f'{mediainfo.title_year} 已在订阅中')
+            action = "subscribe"
+            is_new = False
+        else:
+            # 判断是否需要搜索下载
+            # 条件：添加并启用订阅=开启 且 搜索下载=开启（或远程命令强制）
+            if self._add_and_enable and (self._auto_download or enable_download):
+                # 搜索并下载
+                result = self.__search_and_download_with_action(mediainfo, meta, no_exists, media_type)
+                is_new = result.get("is_new")
+                action = result.get("action")
+            else:
+                # 直接添加订阅
+                is_new = self.__add_subscribe(mediainfo, meta)
+                action = "subscribe" if is_new else "exist"
+
+        # 存储历史记录
+        history_item = {
+            "action": action,
+            "title": mediainfo.title_year,
+            "type": mediainfo.type.value,
+            "year": mediainfo.year,
+            "poster": mediainfo.get_poster_image(),
+            "overview": mediainfo.overview,
+            "tmdbid": tmdb_id,
+            "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+        return {
+            "is_new": is_new,
+            "history": history_item
+        }
 
     def __sync_movie(self, movie_data: dict, enable_download: bool = False, history: List[dict] = None) -> Optional[dict]:
-        """
-        同步单个电影
-        :param movie_data: 电影数据
-        :param enable_download: 是否启用搜索下载（远程命令强制）
-        :param history: 历史记录列表
-        :return: 返回包含is_new和history的字典，或None
-        """
-        title = movie_data.get("title")
-        year = movie_data.get("year")
-        ids = movie_data.get("ids", {})
-        tmdb_id = ids.get("tmdb")
-        imdb_id = ids.get("imdb")
-
-        if not tmdb_id:
-            logger.warning(f"电影 {title} ({year}) 缺少TMDB ID，跳过")
-            return None
-
-        # 检查是否已处理过
-        if history and tmdb_id in [h.get("tmdbid") for h in history]:
-            logger.info(f"电影 {title} ({year}) [TMDB: {tmdb_id}] 已处理过")
-            return None
-
-        logger.info(f"处理电影: {title} ({year}) [TMDB: {tmdb_id}]")
-
-        # 识别媒体信息
-        meta = MetaInfo(title)
-        meta.year = str(year) if year else None
-        meta.type = MediaType.MOVIE
-
-        mediainfo = self.chain.recognize_media(meta=meta, tmdbid=tmdb_id)
-        if not mediainfo:
-            logger.error(f"无法识别电影: {title} ({year})")
-            return None
-
-        # 检查是否已存在
-        downloadchain = DownloadChain()
-        exist_flag, no_exists = downloadchain.get_no_exists_info(meta=meta, mediainfo=mediainfo)
-
-        if exist_flag:
-            logger.info(f'{mediainfo.title_year} 媒体库中已存在')
-            action = "exist"
-            is_new = False
-        elif self.__is_subscribed(tmdb_id, MediaType.MOVIE):
-            logger.info(f'{mediainfo.title_year} 已在订阅中')
-            action = "subscribe"
-            is_new = False
-        else:
-            # 判断是否需要搜索下载
-            # 条件：添加并启用订阅=开启 且 搜索下载=开启（或远程命令强制）
-            if self._add_and_enable and (self._auto_download or enable_download):
-                # 搜索并下载
-                result = self.__search_and_download_movie_with_action(mediainfo, meta, no_exists)
-                is_new = result.get("is_new")
-                action = result.get("action")
-            else:
-                # 直接添加订阅
-                is_new = self.__add_subscribe(mediainfo, meta)
-                action = "subscribe" if is_new else "exist"
-
-        # 存储历史记录
-        history_item = {
-            "action": action,
-            "title": mediainfo.title_year,
-            "type": mediainfo.type.value,
-            "year": mediainfo.year,
-            "poster": mediainfo.get_poster_image(),
-            "overview": mediainfo.overview,
-            "tmdbid": tmdb_id,
-            "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-
-        return {
-            "is_new": is_new,
-            "history": history_item
-        }
+        """同步单个电影（向后兼容方法）"""
+        return self.__sync_media(movie_data, MediaType.MOVIE, enable_download, history)
 
     def __sync_show(self, show_data: dict, enable_download: bool = False, history: List[dict] = None) -> Optional[dict]:
-        """
-        同步单个剧集
-        :param show_data: 剧集数据
-        :param enable_download: 是否启用搜索下载（远程命令强制）
-        :param history: 历史记录列表
-        :return: 返回包含is_new和history的字典，或None
-        """
-        title = show_data.get("title")
-        year = show_data.get("year")
-        ids = show_data.get("ids", {})
-        tmdb_id = ids.get("tmdb")
-
-        if not tmdb_id:
-            logger.warning(f"剧集 {title} ({year}) 缺少TMDB ID，跳过")
-            return None
-
-        # 检查是否已处理过
-        if history and tmdb_id in [h.get("tmdbid") for h in history]:
-            logger.info(f"剧集 {title} ({year}) [TMDB: {tmdb_id}] 已处理过")
-            return None
-
-        logger.info(f"处理剧集: {title} ({year}) [TMDB: {tmdb_id}]")
-
-        # 识别媒体信息
-        meta = MetaInfo(title)
-        meta.year = str(year) if year else None
-        meta.type = MediaType.TV
-
-        mediainfo = self.chain.recognize_media(meta=meta, tmdbid=tmdb_id)
-        if not mediainfo:
-            logger.error(f"无法识别剧集: {title} ({year})")
-            return None
-
-        # 检查是否已存在
-        downloadchain = DownloadChain()
-        exist_flag, no_exists = downloadchain.get_no_exists_info(meta=meta, mediainfo=mediainfo)
-
-        if exist_flag:
-            logger.info(f'{mediainfo.title_year} 媒体库中已完整')
-            action = "exist"
-            is_new = False
-        elif self.__is_subscribed(tmdb_id, MediaType.TV):
-            logger.info(f'{mediainfo.title_year} 已在订阅中')
-            action = "subscribe"
-            is_new = False
-        else:
-            # 判断是否需要搜索下载
-            # 条件：添加并启用订阅=开启 且 搜索下载=开启（或远程命令强制）
-            if self._add_and_enable and (self._auto_download or enable_download):
-                # 搜索并下载
-                result = self.__search_and_download_show_with_action(mediainfo, meta, no_exists)
-                is_new = result.get("is_new")
-                action = result.get("action")
-            else:
-                # 直接添加订阅
-                is_new = self.__add_subscribe(mediainfo, meta)
-                action = "subscribe" if is_new else "exist"
-
-        # 存储历史记录
-        history_item = {
-            "action": action,
-            "title": mediainfo.title_year,
-            "type": mediainfo.type.value,
-            "year": mediainfo.year,
-            "poster": mediainfo.get_poster_image(),
-            "overview": mediainfo.overview,
-            "tmdbid": tmdb_id,
-            "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-
-        return {
-            "is_new": is_new,
-            "history": history_item
-        }
+        """同步单个剧集（向后兼容方法）"""
+        return self.__sync_media(show_data, MediaType.TV, enable_download, history)
 
     def __is_subscribed(self, tmdb_id: int, mtype: MediaType) -> bool:
         """
@@ -1471,12 +1495,13 @@ class TraktSync(_PluginBase):
             logger.error(f"添加订阅异常: {mediainfo.title_year} - {str(e)}")
             return False
 
-    def __search_and_download_movie_with_action(self, mediainfo, meta, no_exists) -> dict:
+    def __search_and_download_with_action(self, mediainfo, meta, no_exists, media_type: MediaType) -> dict:
         """
-        搜索并下载电影（带action返回）
+        搜索并下载媒体（带action返回）
         :param mediainfo: 媒体信息
         :param meta: 元数据
         :param no_exists: 缺失信息
+        :param media_type: 媒体类型（MediaType.MOVIE 或 MediaType.TV）
         :return: 包含is_new和action的字典
         """
         downloadchain = DownloadChain()
@@ -1484,7 +1509,8 @@ class TraktSync(_PluginBase):
         systemconfig = SystemConfigOper()
 
         # 搜索资源
-        logger.info(f"媒体库中不存在，开启搜索下载，开始搜索 {mediainfo.title_year} 的资源...")
+        exist_msg = "媒体库中不存在" if media_type == MediaType.MOVIE else "媒体库中不存在或不完整"
+        logger.info(f"{exist_msg}，开启搜索下载，开始搜索 {mediainfo.title_year} 的资源...")
         filter_results = searchchain.process(
             mediainfo=mediainfo,
             no_exists=no_exists,
@@ -1499,186 +1525,70 @@ class TraktSync(_PluginBase):
 
         # 找到资源，开始下载
         logger.info(f"找到符合条件的资源，开始下载 {mediainfo.title_year} ...")
-        download_id = downloadchain.download_single(
-            context=filter_results[0],
-            username="Trakt想看"
-        )
 
-        if download_id:
-            logger.info(f"下载任务已添加: {mediainfo.title_year}")
-            return {"is_new": True, "action": "download"}
-        else:
-            logger.info(f"下载失败，添加订阅 {mediainfo.title_year}")
-            is_new = self.__add_subscribe(mediainfo, meta)
-            return {"is_new": is_new, "action": "subscribe"}
+        if media_type == MediaType.MOVIE:
+            # 电影使用单个下载
+            download_id = downloadchain.download_single(
+                context=filter_results[0],
+                username="Trakt想看"
+            )
 
-    def __search_and_download_movie(self, mediainfo, meta) -> bool:
-        """
-        搜索并下载电影
-        :return: 是否为新增
-        """
-        downloadchain = DownloadChain()
-        searchchain = SearchChain()
-        systemconfig = SystemConfigOper()
-
-        # 检查媒体库是否已存在
-        exist_flag, no_exists = downloadchain.get_no_exists_info(meta=meta, mediainfo=mediainfo)
-        if exist_flag:
-            logger.info(f'{mediainfo.title_year} 媒体库中已存在')
-            return False
-
-        # 搜索资源
-        logger.info(f"开始搜索资源: {mediainfo.title_year}")
-        filter_results = searchchain.process(
-            mediainfo=mediainfo,
-            no_exists=no_exists,
-            sites=systemconfig.get(SystemConfigKey.RssSites),
-            rule_groups=systemconfig.get(SystemConfigKey.SubscribeFilterRuleGroups)
-        )
-
-        if not filter_results:
-            logger.warning(f"未找到资源: {mediainfo.title_year}，添加订阅")
-            return self.__add_subscribe(mediainfo, meta)
-
-        # 下载
-        download_id = downloadchain.download_single(
-            context=filter_results[0],
-            username="Trakt想看"
-        )
-
-        if download_id:
-            logger.info(f"下载任务已添加: {mediainfo.title_year}")
-            return True
-        else:
-            logger.warning(f"下载失败: {mediainfo.title_year}，添加订阅")
-            return self.__add_subscribe(mediainfo, meta)
-
-    def __search_and_download_show_with_action(self, mediainfo, meta, no_exists) -> dict:
-        """
-        搜索并下载剧集（带action返回）
-        :param mediainfo: 媒体信息
-        :param meta: 元数据
-        :param no_exists: 缺失剧集信息
-        :return: 包含is_new和action的字典
-        """
-        downloadchain = DownloadChain()
-        searchchain = SearchChain()
-        systemconfig = SystemConfigOper()
-        subscribeoper = SubscribeOper()
-
-        # 搜索资源
-        logger.info(f"媒体库中不存在或不完整，开启搜索下载，开始搜索 {mediainfo.title_year} 的资源...")
-        filter_results = searchchain.process(
-            mediainfo=mediainfo,
-            no_exists=no_exists,
-            sites=systemconfig.get(SystemConfigKey.RssSites),
-            rule_groups=systemconfig.get(SystemConfigKey.SubscribeFilterRuleGroups)
-        )
-
-        if not filter_results:
-            logger.info(f"未找到符合条件的资源，添加订阅 {mediainfo.title_year}")
-            is_new = self.__add_subscribe(mediainfo, meta)
-            return {"is_new": is_new, "action": "subscribe"}
-
-        # 找到资源，开始批量下载
-        logger.info(f"找到符合条件的资源，开始下载 {mediainfo.title_year} ...")
-        downloaded_list, lefts = downloadchain.batch_download(
-            contexts=filter_results,
-            no_exists=no_exists,
-            username="Trakt想看"
-        )
-
-        if not downloaded_list and not lefts:
-            # 没有下载任何内容
-            logger.info(f"下载失败，添加订阅 {mediainfo.title_year}")
-            is_new = self.__add_subscribe(mediainfo, meta)
-            return {"is_new": is_new, "action": "subscribe"}
-
-        if lefts:
-            # 有未下载完的剧集，添加订阅
-            logger.info(f"下载失败或未下载完所有剧集，添加订阅 {mediainfo.title_year}")
-            sub_id, message = self.__add_subscribe(mediainfo, meta)
-
-            if sub_id:
-                # 更新订阅信息
-                logger.info(f"根据缺失剧集更新订阅信息 {mediainfo.title_year}")
-                subscribe = subscribeoper.get(sub_id)
-                if subscribe:
-                    SubscribeChain().finish_subscribe_or_not(
-                        subscribe=subscribe,
-                        meta=meta,
-                        mediainfo=mediainfo,
-                        downloads=downloaded_list,
-                        lefts=lefts
-                    )
-
-            # 有下载内容，但未完成
-            if downloaded_list:
+            if download_id:
+                logger.info(f"下载任务已添加: {mediainfo.title_year}")
                 return {"is_new": True, "action": "download"}
             else:
-                return {"is_new": True, "action": "subscribe"}
+                logger.info(f"下载失败，添加订阅 {mediainfo.title_year}")
+                is_new = self.__add_subscribe(mediainfo, meta)
+                return {"is_new": is_new, "action": "subscribe"}
         else:
-            # 全部下载完成
-            return {"is_new": True, "action": "download"}
+            # 剧集使用批量下载
+            subscribeoper = SubscribeOper()
+            downloaded_list, lefts = downloadchain.batch_download(
+                contexts=filter_results,
+                no_exists=no_exists,
+                username="Trakt想看"
+            )
 
-    def __search_and_download_show(self, mediainfo, meta) -> bool:
-        """
-        搜索并下载剧集
-        :return: 是否为新增
-        """
-        downloadchain = DownloadChain()
-        searchchain = SearchChain()
-        systemconfig = SystemConfigOper()
-        subscribeoper = SubscribeOper()
+            if not downloaded_list and not lefts:
+                # 没有下载任何内容
+                logger.info(f"下载失败，添加订阅 {mediainfo.title_year}")
+                is_new = self.__add_subscribe(mediainfo, meta)
+                return {"is_new": is_new, "action": "subscribe"}
 
-        # 检查缺失剧集
-        exist_flag, no_exists = downloadchain.get_no_exists_info(meta=meta, mediainfo=mediainfo)
+            if lefts:
+                # 有未下载完的剧集，添加订阅
+                logger.info(f"下载失败或未下载完所有剧集，添加订阅 {mediainfo.title_year}")
+                sub_id, message = self.__add_subscribe(mediainfo, meta)
 
-        if exist_flag:
-            logger.info(f'{mediainfo.title_year} 媒体库中已完整')
-            return False
+                if sub_id:
+                    # 更新订阅信息
+                    logger.info(f"根据缺失剧集更新订阅信息 {mediainfo.title_year}")
+                    subscribe = subscribeoper.get(sub_id)
+                    if subscribe:
+                        SubscribeChain().finish_subscribe_or_not(
+                            subscribe=subscribe,
+                            meta=meta,
+                            mediainfo=mediainfo,
+                            downloads=downloaded_list,
+                            lefts=lefts
+                        )
 
-        # 搜索资源
-        logger.info(f"开始搜索资源: {mediainfo.title_year}")
-        filter_results = searchchain.process(
-            mediainfo=mediainfo,
-            no_exists=no_exists,
-            sites=systemconfig.get(SystemConfigKey.RssSites),
-            rule_groups=systemconfig.get(SystemConfigKey.SubscribeFilterRuleGroups)
-        )
+                # 有下载内容，但未完成
+                if downloaded_list:
+                    return {"is_new": True, "action": "download"}
+                else:
+                    return {"is_new": True, "action": "subscribe"}
+            else:
+                # 全部下载完成
+                return {"is_new": True, "action": "download"}
 
-        if not filter_results:
-            logger.warning(f"未找到资源: {mediainfo.title_year}，添加订阅")
-            return self.__add_subscribe(mediainfo, meta)
+    def __search_and_download_movie_with_action(self, mediainfo, meta, no_exists) -> dict:
+        """搜索并下载电影（向后兼容方法）"""
+        return self.__search_and_download_with_action(mediainfo, meta, no_exists, MediaType.MOVIE)
 
-        # 批量下载
-        downloaded_list, lefts = downloadchain.batch_download(
-            contexts=filter_results,
-            no_exists=no_exists,
-            username="Trakt想看"
-        )
-
-        if downloaded_list:
-            logger.info(f"已下载部分剧集: {mediainfo.title_year}")
-
-        # 如果还有未下载的剧集，添加订阅
-        if lefts:
-            logger.info(f"还有未下载的剧集，添加订阅: {mediainfo.title_year}")
-            sub_id, message = self.__add_subscribe(mediainfo, meta)
-            if sub_id:
-                # 更新订阅状态
-                subscribe = subscribeoper.get(sub_id)
-                if subscribe:
-                    SubscribeChain().finish_subscribe_or_not(
-                        subscribe=subscribe,
-                        meta=meta,
-                        mediainfo=mediainfo,
-                        downloads=downloaded_list,
-                        lefts=lefts
-                    )
-            return True
-
-        return len(downloaded_list) > 0
+    def __search_and_download_show_with_action(self, mediainfo, meta, no_exists) -> dict:
+        """搜索并下载剧集（向后兼容方法）"""
+        return self.__search_and_download_with_action(mediainfo, meta, no_exists, MediaType.TV)
 
     def __send_notification(self, stats: dict):
         """
@@ -1723,12 +1633,24 @@ class TraktSync(_PluginBase):
                 "name": "同步并下载Trakt想看",
                 "func": self.action_sync_download,
                 "kwargs": {}
+            },
+            {
+                "id": "trakt_sync_custom_lists",
+                "name": "同步Trakt自定义列表",
+                "func": self.action_sync_custom_lists,
+                "kwargs": {}
             }
         ]
 
-    def api_sync(self, apikey: str):
+    def __api_wrapper(self, apikey: str, func_name: str, func_callable, *args, **kwargs):
         """
-        API端点：触发同步
+        API调用统一包装器
+        :param apikey: API密钥
+        :param func_name: 功能名称
+        :param func_callable: 要调用的函数
+        :param args: 函数参数
+        :param kwargs: 函数关键字参数
+        :return: Response对象
         """
         from app import schemas
 
@@ -1736,53 +1658,178 @@ class TraktSync(_PluginBase):
             return schemas.Response(success=False, message="API密钥错误")
 
         try:
-            logger.info("通过API触发Trakt想看同步")
-            self.sync(force_download=False)
-            return schemas.Response(success=True, message="同步任务已启动")
+            logger.info(f"通过API触发{func_name}")
+            func_callable(*args, **kwargs)
+            return schemas.Response(success=True, message=f"{func_name}任务已启动")
         except Exception as e:
-            logger.error(f"API同步失败: {str(e)}")
-            return schemas.Response(success=False, message=f"同步失败: {str(e)}")
+            logger.error(f"API {func_name}失败: {str(e)}")
+            return schemas.Response(success=False, message=f"{func_name}失败: {str(e)}")
+
+    def api_sync(self, apikey: str):
+        """API端点：触发同步"""
+        return self.__api_wrapper(apikey, "Trakt想看同步", self.sync, force_download=False)
 
     def api_sync_download(self, apikey: str):
-        """
-        API端点：触发同步并下载
-        """
-        from app import schemas
+        """API端点：触发同步并下载"""
+        return self.__api_wrapper(apikey, "Trakt想看同步并下载", self.sync, force_download=True)
 
-        if apikey != settings.API_TOKEN:
-            return schemas.Response(success=False, message="API密钥错误")
+    def api_sync_custom_lists(self, apikey: str):
+        """API端点：触发自定义列表同步"""
+        return self.__api_wrapper(apikey, "Trakt自定义列表同步", self.sync_custom_lists)
 
+    def __action_wrapper(self, action_content, func_name: str, func_callable, *args, **kwargs):
+        """
+        工作流动作统一包装器
+        :param action_content: 动作内容
+        :param func_name: 功能名称
+        :param func_callable: 要调用的函数
+        :param args: 函数参数
+        :param kwargs: 函数关键字参数
+        :return: (是否成功, 动作内容)
+        """
         try:
-            logger.info("通过API触发Trakt想看同步并下载")
-            self.sync(force_download=True)
-            return schemas.Response(success=True, message="同步下载任务已启动")
+            logger.info(f"工作流触发{func_name}")
+            func_callable(*args, **kwargs)
+            return True, action_content
         except Exception as e:
-            logger.error(f"API同步下载失败: {str(e)}")
-            return schemas.Response(success=False, message=f"同步下载失败: {str(e)}")
+            logger.error(f"工作流{func_name}失败: {str(e)}")
+            return False, action_content
 
     def action_sync(self, action_content):
-        """
-        工作流动作：同步Trakt想看
-        """
-        try:
-            logger.info("工作流触发Trakt想看同步")
-            self.sync(force_download=False)
-            return True, action_content
-        except Exception as e:
-            logger.error(f"工作流同步失败: {str(e)}")
-            return False, action_content
+        """工作流动作：同步Trakt想看"""
+        return self.__action_wrapper(action_content, "Trakt想看同步", self.sync, force_download=False)
 
     def action_sync_download(self, action_content):
+        """工作流动作：同步并下载Trakt想看"""
+        return self.__action_wrapper(action_content, "Trakt想看同步并下载", self.sync, force_download=True)
+
+    def action_sync_custom_lists(self, action_content):
+        """工作流动作：同步Trakt自定义列表"""
+        return self.__action_wrapper(action_content, "Trakt自定义列表同步", self.sync_custom_lists)
+
+    def sync_custom_lists(self):
         """
-        工作流动作：同步并下载Trakt想看
+        同步Trakt自定义列表
+        """
+        if not self._custom_lists:
+            logger.warning("未配置自定义列表，跳过同步")
+            return
+
+        if not self._client_id or not self._client_secret or not self._refresh_token:
+            logger.error("Trakt配置不完整，请检查Client ID、Client Secret和Refresh Token")
+            return
+
+        # 刷新 access token
+        if not self.__refresh_access_token():
+            logger.error("Trakt access token刷新失败，同步终止")
+            return
+
+        logger.info("开始同步Trakt自定义列表...")
+
+        # 读取历史记录
+        history: List[dict] = self.get_data('history') or []
+
+        # 统计数据
+        stats = self.__init_sync_stats()
+
+        # 解析自定义列表配置
+        list_configs = self._custom_lists.split(",")
+
+        for list_config in list_configs:
+            list_config = list_config.strip()
+            if not list_config:
+                continue
+
+            # 解析列表配置
+            username, list_id = self.__parse_list_config(list_config)
+            if not username or not list_id:
+                logger.error(f"无效的列表配置: {list_config}")
+                stats["errors"] += 1
+                continue
+
+            logger.info(f"同步自定义列表: {username}/{list_id}")
+
+            # 获取列表内容
+            items = self.__get_custom_list_items(username, list_id)
+            if not items:
+                logger.warning(f"未获取到列表内容: {username}/{list_id}")
+                continue
+
+            logger.info(f"获取到 {len(items)} 个列表项")
+
+            # 处理列表项
+            for item in items:
+                try:
+                    item_type = item.get("type")
+
+                    if item_type == "movie":
+                        movie_data = item.get("movie", {})
+                        result = self.__sync_movie(movie_data, False, history)
+                        if result:
+                            if result.get("is_new"):
+                                stats["movies_added"] += 1
+                            else:
+                                stats["movies_exists"] += 1
+                            history.append(result.get("history"))
+
+                    elif item_type == "show":
+                        show_data = item.get("show", {})
+                        result = self.__sync_show(show_data, False, history)
+                        if result:
+                            if result.get("is_new"):
+                                stats["shows_added"] += 1
+                            else:
+                                stats["shows_exists"] += 1
+                            history.append(result.get("history"))
+
+                    else:
+                        logger.warning(f"未知的项目类型: {item_type}")
+
+                except Exception as e:
+                    logger.error(f"同步列表项失败: {str(e)}")
+                    stats["errors"] += 1
+
+        # 保存历史记录
+        self.save_data('history', history)
+
+        # 发送通知
+        if self._notify:
+            self.__send_notification(stats)
+
+        logger.info(f"Trakt自定义列表同步完成: 新增电影 {stats['movies_added']} 部，"
+                   f"新增剧集 {stats['shows_added']} 部，"
+                   f"已存在电影 {stats['movies_exists']} 部，"
+                   f"已存在剧集 {stats['shows_exists']} 部，"
+                   f"错误 {stats['errors']} 个")
+
+    def __parse_list_config(self, config: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        解析列表配置
+        :param config: username/list_id 或 https://trakt.tv/users/username/lists/list_id
+        :return: (username, list_id)
         """
         try:
-            logger.info("工作流触发Trakt想看同步并下载")
-            self.sync(force_download=True)
-            return True, action_content
+            # 如果是URL格式
+            if config.startswith("http"):
+                # https://trakt.tv/users/username/lists/list_id
+                parts = config.rstrip("/").split("/")
+                if len(parts) >= 6 and "users" in parts and "lists" in parts:
+                    users_index = parts.index("users")
+                    lists_index = parts.index("lists")
+                    username = parts[users_index + 1]
+                    list_id = parts[lists_index + 1]
+                    return username, list_id
+            else:
+                # username/list_id 格式
+                parts = config.split("/")
+                if len(parts) == 2:
+                    return parts[0].strip(), parts[1].strip()
+
+            return None, None
+
         except Exception as e:
-            logger.error(f"工作流同步下载失败: {str(e)}")
-            return False, action_content
+            logger.error(f"解析列表配置失败: {config} - {str(e)}")
+            return None, None
 
     def delete_history(self, tmdbid: str, apikey: str):
         """

@@ -370,6 +370,78 @@ TraktSync 插件将 Trakt API 数据映射到 MoviePilot 所需格式：
 
 ---
 
+## 自定义列表 API
+
+### 获取自定义列表内容
+
+**端点**: `GET /users/{username}/lists/{list_id}/items`
+
+**请求头**:
+
+```http
+Content-Type: application/json
+trakt-api-version: 2
+trakt-api-key: {CLIENT_ID}
+Authorization: Bearer {ACCESS_TOKEN}
+```
+
+**cURL 示例**:
+
+```bash
+curl -X GET "https://api.trakt.tv/users/justin/lists/star-wars/items" \
+  -H "Content-Type: application/json" \
+  -H "trakt-api-version: 2" \
+  -H "trakt-api-key: YOUR_CLIENT_ID" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+**响应**:
+
+```json
+[
+  {
+    "rank": 1,
+    "id": 12345,
+    "listed_at": "2024-01-15T10:30:00.000Z",
+    "type": "movie",
+    "movie": {
+      "title": "Star Wars",
+      "year": 1977,
+      "ids": {
+        "trakt": 466,
+        "slug": "star-wars-1977",
+        "imdb": "tt0076759",
+        "tmdb": 11
+      }
+    }
+  },
+  {
+    "rank": 2,
+    "id": 67890,
+    "listed_at": "2024-02-10T14:20:00.000Z",
+    "type": "show",
+    "show": {
+      "title": "The Mandalorian",
+      "year": 2019,
+      "ids": {
+        "trakt": 139211,
+        "slug": "the-mandalorian",
+        "tvdb": 361753,
+        "imdb": "tt8111088",
+        "tmdb": 82856
+      }
+    }
+  }
+]
+```
+
+**字段说明**:
+- `type`: 类型（"movie" 或 "show"）
+- `movie`/`show`: 电影或剧集的详细信息
+- 其他字段同 Watchlist API
+
+---
+
 ## 插件 API 端点
 
 TraktSync 插件提供以下 API 端点用于触发同步和管理历史记录。
@@ -434,6 +506,38 @@ curl -X POST "http://localhost:3000/api/v1/plugin/TraktSync/sync_download?apikey
 **说明**:
 - 触发Trakt想看列表同步
 - 优先搜索下载，失败时添加订阅
+- 异步执行，立即返回
+
+---
+
+### 触发自定义列表同步
+
+**端点**: `POST /api/v1/plugin/TraktSync/sync_custom_lists`
+
+**请求参数**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|------|------|
+| apikey | string | 是 | MoviePilot API Token |
+
+**cURL 示例**:
+
+```bash
+curl -X POST "http://localhost:3000/api/v1/plugin/TraktSync/sync_custom_lists?apikey=YOUR_API_TOKEN"
+```
+
+**成功响应**:
+
+```json
+{
+  "success": true,
+  "message": "自定义列表同步任务已启动"
+}
+```
+
+**说明**:
+- 触发配置的Trakt自定义列表同步
+- 同步配置中所有列表的电影和剧集
 - 异步执行，立即返回
 
 ---
@@ -544,6 +648,32 @@ TraktSync 插件支持以下远程命令，可通过 MoviePilot 的消息通知�
 
 ---
 
+### 同步 Trakt 自定义列表
+
+**命令**: `/trakt_custom_lists`
+
+**分类**: 订阅
+
+**描述**: 同步配置的 Trakt 自定义列表
+
+**执行流程**:
+1. 读取插件配置中的自定义列表
+2. 逐个获取列表内容
+3. 处理列表中的电影和剧集
+4. 添加订阅或下载
+5. 记录同步历史
+
+**使用场景**:
+- 同步策划的主题列表（如"漫威电影宇宙"、"必看经典"等）
+- 同步他人分享的列表
+- 批量添加订阅
+
+**注意**:
+- 需要在插件配置中预先设置自定义列表
+- 支持多个列表，用逗号分隔
+
+---
+
 ## 工作流动作（Workflow Actions）
 
 TraktSync 插件注册了以下工作流动作，可在 MoviePilot 工作流编排中使用。
@@ -590,6 +720,37 @@ TraktSync 插件注册了以下工作流动作，可在 MoviePilot 工作流编�
 
 ---
 
+### 同步Trakt自定义列表
+
+**动作ID**: `trakt_sync_custom_lists`
+
+**动作名称**: 同步Trakt自定义列表
+
+**功能**: 同步配置的Trakt自定义列表
+
+**参数**: 无
+
+**返回**:
+- `成功`: `True, ActionContent`
+- `失败`: `False, ActionContent`
+
+**使用场景**:
+- 定期同步主题列表
+- 批量处理自定义收藏
+- 与条件触发器结合
+
+**配置要求**:
+- 插件配置中需要预先设置自定义列表
+- 列表格式：`username/list_id` 或完整URL
+- 多个列表用逗号分隔
+
+**示例配置**:
+```
+justin/star-wars, https://trakt.tv/users/jasonbourne/lists/action-movies
+```
+
+---
+
 ## 集成示例
 
 ### Python 脚本调用
@@ -614,6 +775,13 @@ response = requests.post(
     params={"apikey": api_token}
 )
 print(response.json())
+
+# 触发自定义列表同步
+response = requests.post(
+    f"{base_url}/api/v1/plugin/TraktSync/sync_custom_lists",
+    params={"apikey": api_token}
+)
+print(response.json())
 ```
 
 ### Bash脚本调用
@@ -629,12 +797,15 @@ curl -X POST "${BASE_URL}/api/v1/plugin/TraktSync/sync?apikey=${API_TOKEN}"
 
 # 触发同步并下载
 curl -X POST "${BASE_URL}/api/v1/plugin/TraktSync/sync_download?apikey=${API_TOKEN}"
+
+# 触发自定义列表同步
+curl -X POST "${BASE_URL}/api/v1/plugin/TraktSync/sync_custom_lists?apikey=${API_TOKEN}"
 ```
 
 ### 工作流配置示例
 
 ```yaml
-# 示例：每天凌晨2点同步Trakt想看
+# 示例1：每天凌晨2点同步Trakt想看
 workflow:
   name: "每日Trakt同步"
   trigger:
@@ -643,6 +814,16 @@ workflow:
   actions:
     - plugin: "TraktSync"
       action: "trakt_sync"
+
+# 示例2：每周日晚上8点同步自定义列表
+workflow:
+  name: "每周Trakt列表同步"
+  trigger:
+    type: "cron"
+    cron: "0 20 * * 0"
+  actions:
+    - plugin: "TraktSync"
+      action: "trakt_sync_custom_lists"
 ```
 
 ---
@@ -654,3 +835,4 @@ workflow:
 | 1.0 | 2024-02-15 | 初始版本 |
 | 1.1 | 2026-02-15 | 新增插件API端点文档；新增远程命令说明 |
 | 1.2 | 2026-02-15 | 新增同步API端点；新增工作流动作注册；新增集成示例 |
+| 1.3 | 2026-02-15 | 新增Trakt自定义列表API；新增自定义列表同步功能；新增工作流动作和远程命令 |
