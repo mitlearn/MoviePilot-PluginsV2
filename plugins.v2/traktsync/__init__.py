@@ -24,7 +24,7 @@ class TraktSync(_PluginBase):
     # ── 元信息（类变量）──
     plugin_name = "Trakt想看"
     plugin_desc = "同步Trakt想看数据，自动添加订阅。"
-    plugin_icon = "trakt.png"
+    plugin_icon = "Trakt_A.png"
     plugin_version = "0.1.0"
     plugin_author = "MoviePilot"
     author_url = "https://github.com/jxxghp/MoviePilot"

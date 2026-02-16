@@ -35,14 +35,14 @@
   },
   "TraktSync": {
     "name": "Trakt想看",
-    "description": "同步Trakt想看列表，自动添加订阅或搜索下载。支持OAuth认证与自动Token刷新。",
+    "description": "同步Trakt想看列表，自动添加订阅或搜索下载。",
     "labels": "订阅,trakt,同步",
     "version": "0.1.0",
-    "icon": "trakt.png",
-    "author": "MoviePilot",
-    "level": 2,
+    "icon": "Trakt_A.png",
+    "author": "Claude",
+    "level": 1,
     "history": {
-      "v0.1.0": "初始版本；支持同步Trakt Watchlist电影和剧集；OAuth 2.0认证；自动Token刷新；定时任务；远程命令；可选自动搜索下载"
+      "v0.1.0": "初始版本；支持同步Trakt Watchlist电影和剧集"
     }
   }
 }
