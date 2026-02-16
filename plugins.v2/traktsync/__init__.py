@@ -24,7 +24,7 @@ class TraktSync(_PluginBase):
     plugin_name = "Trakt想看"
     plugin_desc = "同步Trakt想看数据，自动添加订阅。"
     plugin_icon = "Trakt_A.png"
-    plugin_version = "0.1.0"
+    plugin_version = "0.2.0"
     plugin_author = "Claude"
     author_url = "https://github.com/"
     plugin_config_prefix = "traktsync_"
@@ -54,6 +54,9 @@ class TraktSync(_PluginBase):
     _access_token: str = ""
     _token_expires_at: Optional[datetime.datetime] = None
     _auto_download: bool = False
+    _sync_type: str = "all"  # 同步类型：all/movie/tv
+    _last_sync_time: str = ""  # 上次同步时间
+    _tabs: str = "sync_tab"  # 当前标签页
 
     def init_plugin(self, config: dict = None):
         """初始化插件配置"""
@@ -76,6 +79,9 @@ class TraktSync(_PluginBase):
             self._refresh_token = config.get("refresh_token", "")
             self._access_token = config.get("access_token", "")
             self._auto_download = config.get("auto_download", False)
+            self._sync_type = config.get("sync_type", "all")
+            self._last_sync_time = config.get("last_sync_time", "")
+            self._tabs = config.get("_tabs", "sync_tab")
 
             # 解析 token 过期时间
             token_expires_str = config.get("token_expires_at")
@@ -143,6 +149,9 @@ class TraktSync(_PluginBase):
             "refresh_token": self._refresh_token,
             "access_token": self._access_token,
             "auto_download": self._auto_download,
+            "sync_type": self._sync_type,
+            "last_sync_time": self._last_sync_time,
+            "_tabs": self._tabs,
         }
         if self._token_expires_at:
             config["token_expires_at"] = self._token_expires_at.isoformat()
@@ -193,118 +202,218 @@ class TraktSync(_PluginBase):
                         ]
                     },
                     {
-                        'component': 'VRow',
+                        'component': 'VTabs',
+                        'props': {
+                            'model': '_tabs',
+                            'style': {
+                                'margin-top': '8px',
+                                'margin-bottom': '16px'
+                            },
+                            'stacked': False,
+                            'fixed-tabs': False
+                        },
                         'content': [
                             {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 4},
-                                'content': [{
-                                    'component': 'VSwitch',
-                                    'props': {
-                                        'model': 'auto_download',
-                                        'label': '搜索下载',
-                                        'hint': '同步后自动搜索并下载资源',
-                                        'persistent-hint': True
-                                    }
-                                }]
+                                'component': 'VTab',
+                                'props': {
+                                    'value': 'sync_tab'
+                                },
+                                'text': '同步设置'
                             },
                             {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 8},
-                                'content': [{
-                                    'component': 'VTextField',
-                                    'props': {
-                                        'model': 'cron',
-                                        'label': '执行周期',
-                                        'placeholder': '5位cron表达式，留空则默认每天执行一次'
-                                    }
-                                }]
-                            },
+                                'component': 'VTab',
+                                'props': {
+                                    'value': 'trakt_tab'
+                                },
+                                'text': 'Trakt配置'
+                            }
                         ]
                     },
                     {
-                        'component': 'VRow',
+                        'component': 'VWindow',
+                        'props': {
+                            'model': '_tabs'
+                        },
                         'content': [
+                            # 标签页1：同步设置
                             {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 6},
-                                'content': [{
-                                    'component': 'VTextField',
-                                    'props': {
-                                        'model': 'client_id',
-                                        'label': 'Trakt Client ID',
-                                        'placeholder': '请输入Trakt应用的Client ID'
+                                'component': 'VWindowItem',
+                                'props': {
+                                    'value': 'sync_tab'
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VRow',
+                                        'props': {
+                                            'style': {
+                                                'margin-top': '0px'
+                                            }
+                                        },
+                                        'content': [
+                                            {
+                                                'component': 'VCol',
+                                                'props': {'cols': 12, 'md': 4},
+                                                'content': [{
+                                                    'component': 'VCronField',
+                                                    'props': {
+                                                        'model': 'cron',
+                                                        'label': '同步周期',
+                                                        'placeholder': '如：0 8 * * *',
+                                                        'hint': '5位cron表达式，留空则默认每天执行一次'
+                                                    }
+                                                }]
+                                            },
+                                            {
+                                                'component': 'VCol',
+                                                'props': {'cols': 12, 'md': 4},
+                                                'content': [{
+                                                    'component': 'VSelect',
+                                                    'props': {
+                                                        'model': 'sync_type',
+                                                        'label': '同步类型',
+                                                        'items': [
+                                                            {'title': '全部', 'value': 'all'},
+                                                            {'title': '仅电影', 'value': 'movie'},
+                                                            {'title': '仅剧集', 'value': 'tv'}
+                                                        ]
+                                                    }
+                                                }]
+                                            },
+                                            {
+                                                'component': 'VCol',
+                                                'props': {'cols': 12, 'md': 4},
+                                                'content': [{
+                                                    'component': 'VSwitch',
+                                                    'props': {
+                                                        'model': 'auto_download',
+                                                        'label': '搜索下载',
+                                                        'hint': '开启后会自动搜索下载，关闭则添加为暂停订阅',
+                                                        'persistent-hint': True
+                                                    }
+                                                }]
+                                            },
+                                        ]
+                                    },
+                                    {
+                                        'component': 'VRow',
+                                        'content': [
+                                            {
+                                                'component': 'VCol',
+                                                'props': {'cols': 12},
+                                                'content': [{
+                                                    'component': 'VAlert',
+                                                    'props': {
+                                                        'type': 'info',
+                                                        'variant': 'tonal',
+                                                        'text': '同步设置说明：\n'
+                                                               '• 同步周期：设置定时同步的执行周期，支持cron表达式\n'
+                                                               '• 同步类型：选择同步电影、剧集或全部\n'
+                                                               '• 搜索下载：开启后会自动搜索并下载资源；关闭则只添加暂停订阅，手动开启后才会搜索下载'
+                                                    }
+                                                }]
+                                            }
+                                        ]
                                     }
-                                }]
+                                ]
                             },
+                            # 标签页2：Trakt配置
                             {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 6},
-                                'content': [{
-                                    'component': 'VTextField',
-                                    'props': {
-                                        'model': 'client_secret',
-                                        'label': 'Trakt Client Secret',
-                                        'placeholder': '请输入Trakt应用的Client Secret'
+                                'component': 'VWindowItem',
+                                'props': {
+                                    'value': 'trakt_tab'
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VRow',
+                                        'props': {
+                                            'style': {
+                                                'margin-top': '0px'
+                                            }
+                                        },
+                                        'content': [
+                                            {
+                                                'component': 'VCol',
+                                                'props': {'cols': 12, 'md': 6},
+                                                'content': [{
+                                                    'component': 'VTextField',
+                                                    'props': {
+                                                        'model': 'client_id',
+                                                        'label': 'Client ID',
+                                                        'placeholder': '请输入Trakt应用的Client ID'
+                                                    }
+                                                }]
+                                            },
+                                            {
+                                                'component': 'VCol',
+                                                'props': {'cols': 12, 'md': 6},
+                                                'content': [{
+                                                    'component': 'VTextField',
+                                                    'props': {
+                                                        'model': 'client_secret',
+                                                        'label': 'Client Secret',
+                                                        'placeholder': '请输入Trakt应用的Client Secret'
+                                                    }
+                                                }]
+                                            },
+                                        ]
+                                    },
+                                    {
+                                        'component': 'VRow',
+                                        'content': [
+                                            {
+                                                'component': 'VCol',
+                                                'props': {'cols': 12, 'md': 6},
+                                                'content': [{
+                                                    'component': 'VTextField',
+                                                    'props': {
+                                                        'model': 'auth_code',
+                                                        'label': '授权码（Authorization Code）',
+                                                        'placeholder': '填写授权码后保存，将自动获取Token',
+                                                        'hint': '填写授权码后将自动获取并保存Refresh Token',
+                                                        'persistent-hint': True
+                                                    }
+                                                }]
+                                            },
+                                            {
+                                                'component': 'VCol',
+                                                'props': {'cols': 12, 'md': 6},
+                                                'content': [{
+                                                    'component': 'VTextField',
+                                                    'props': {
+                                                        'model': 'refresh_token',
+                                                        'label': 'Refresh Token（可选）',
+                                                        'placeholder': '自动获取，也可手动填写',
+                                                        'hint': '通过授权码自动获取，或手动填写',
+                                                        'persistent-hint': True
+                                                    }
+                                                }]
+                                            },
+                                        ]
+                                    },
+                                    {
+                                        'component': 'VRow',
+                                        'content': [
+                                            {
+                                                'component': 'VCol',
+                                                'props': {'cols': 12},
+                                                'content': [{
+                                                    'component': 'VAlert',
+                                                    'props': {
+                                                        'type': 'info',
+                                                        'variant': 'tonal',
+                                                        'text': 'Trakt配置说明：\n'
+                                                               '1. 前往 https://trakt.tv/oauth/applications/new 创建应用\n'
+                                                               '   • Redirect URI 必须填写：urn:ietf:wg:oauth:2.0:oob\n'
+                                                               '2. 填写 Client ID 和 Client Secret 后保存，日志中会输出授权链接\n'
+                                                               '3. 访问授权链接，授权后将获得授权码\n'
+                                                               '4. 将授权码填入【授权码】字段并保存，插件将自动获取 Token\n'
+                                                               '5. Token 有效期 90 天，过期前会自动刷新（每 72 小时检查一次）'
+                                                    }
+                                                }]
+                                            }
+                                        ]
                                     }
-                                }]
-                            },
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 6},
-                                'content': [{
-                                    'component': 'VTextField',
-                                    'props': {
-                                        'model': 'auth_code',
-                                        'label': '授权码（Authorization Code）',
-                                        'placeholder': '填写授权码后保存，将自动获取Token',
-                                        'hint': '填写授权码后将自动获取并保存Refresh Token',
-                                        'persistent-hint': True
-                                    }
-                                }]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 6},
-                                'content': [{
-                                    'component': 'VTextField',
-                                    'props': {
-                                        'model': 'refresh_token',
-                                        'label': 'Refresh Token（可选）',
-                                        'placeholder': '自动获取，也可手动填写',
-                                        'hint': '通过授权码自动获取，或手动填写',
-                                        'persistent-hint': True
-                                    }
-                                }]
-                            },
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {'cols': 12},
-                                'content': [{
-                                    'component': 'VAlert',
-                                    'props': {
-                                        'type': 'info',
-                                        'variant': 'tonal',
-                                        'text': '使用说明：\n'
-                                               '1. 前往 https://trakt.tv/oauth/applications/new 创建应用\n'
-                                               '   - Redirect URI必须填写：urn:ietf:wg:oauth:2.0:oob\n'
-                                               '2. 填写Client ID和Client Secret后保存，日志中会输出授权链接\n'
-                                               '3. 访问授权链接，授权后将获得授权码\n'
-                                               '4. 将授权码填入【授权码】字段并保存，插件将自动获取Token\n'
-                                               '5. 搜索下载开启后，会自动搜索资源并下载，未下载完成的会自动添加订阅\n'
-                                               '6. Token有效期3个月，过期前会自动刷新'
-                                    }
-                                }]
+                                ]
                             }
                         ]
                     }
@@ -315,29 +424,341 @@ class TraktSync(_PluginBase):
             "notify": True,
             "onlyonce": False,
             "cron": "0 8 * * *",
+            "sync_type": "all",
+            "auto_download": False,
             "client_id": "",
             "client_secret": "",
             "auth_code": "",
             "refresh_token": "",
-            "auto_download": False
+            "_tabs": "sync_tab"
         }
 
     def get_page(self) -> Optional[List[dict]]:
         """插件详情页面"""
+        from app.utils.string import StringUtils
+
         # 查询同步详情
-        historys = self.get_data('history')
+        historys = self.get_data('history') or []
+
+        # 统计数据
+        total_count = len(historys)
+        movies_count = len([h for h in historys if h.get("type") == "电影"])
+        tv_count = len([h for h in historys if h.get("type") == "电视剧"])
+
+        # 获取上次同步时间
+        last_sync_time = self._last_sync_time or "未同步"
+
+        # Header 统计信息（参考 BrushFlow 样式）
+        header_elements = [
+            {
+                'component': 'VRow',
+                'props': {
+                    'class': 'mb-3'
+                },
+                'content': [
+                    # 上次同步时间
+                    {
+                        'component': 'VCol',
+                        'props': {
+                            'cols': 12,
+                            'md': 3,
+                            'sm': 6
+                        },
+                        'content': [
+                            {
+                                'component': 'VCard',
+                                'props': {
+                                    'variant': 'tonal',
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VCardText',
+                                        'props': {
+                                            'class': 'd-flex align-center',
+                                        },
+                                        'content': [
+                                            {
+                                                'component': 'VAvatar',
+                                                'props': {
+                                                    'rounded': True,
+                                                    'variant': 'text',
+                                                    'class': 'me-3'
+                                                },
+                                                'content': [
+                                                    {
+                                                        'component': 'VIcon',
+                                                        'props': {
+                                                            'icon': 'mdi-clock-outline',
+                                                            'size': '28'
+                                                        }
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                'component': 'div',
+                                                'content': [
+                                                    {
+                                                        'component': 'span',
+                                                        'props': {
+                                                            'class': 'text-caption'
+                                                        },
+                                                        'text': '上次同步'
+                                                    },
+                                                    {
+                                                        'component': 'div',
+                                                        'props': {
+                                                            'class': 'd-flex align-center flex-wrap'
+                                                        },
+                                                        'content': [
+                                                            {
+                                                                'component': 'span',
+                                                                'props': {
+                                                                    'class': 'text-h6'
+                                                                },
+                                                                'text': last_sync_time
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    # 同步总数
+                    {
+                        'component': 'VCol',
+                        'props': {
+                            'cols': 12,
+                            'md': 3,
+                            'sm': 6
+                        },
+                        'content': [
+                            {
+                                'component': 'VCard',
+                                'props': {
+                                    'variant': 'tonal',
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VCardText',
+                                        'props': {
+                                            'class': 'd-flex align-center',
+                                        },
+                                        'content': [
+                                            {
+                                                'component': 'VAvatar',
+                                                'props': {
+                                                    'rounded': True,
+                                                    'variant': 'text',
+                                                    'class': 'me-3'
+                                                },
+                                                'content': [
+                                                    {
+                                                        'component': 'VIcon',
+                                                        'props': {
+                                                            'icon': 'mdi-format-list-bulleted',
+                                                            'size': '28'
+                                                        }
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                'component': 'div',
+                                                'content': [
+                                                    {
+                                                        'component': 'span',
+                                                        'props': {
+                                                            'class': 'text-caption'
+                                                        },
+                                                        'text': '同步总数'
+                                                    },
+                                                    {
+                                                        'component': 'div',
+                                                        'props': {
+                                                            'class': 'd-flex align-center flex-wrap'
+                                                        },
+                                                        'content': [
+                                                            {
+                                                                'component': 'span',
+                                                                'props': {
+                                                                    'class': 'text-h6'
+                                                                },
+                                                                'text': str(total_count)
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    # 电影数量
+                    {
+                        'component': 'VCol',
+                        'props': {
+                            'cols': 12,
+                            'md': 3,
+                            'sm': 6
+                        },
+                        'content': [
+                            {
+                                'component': 'VCard',
+                                'props': {
+                                    'variant': 'tonal',
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VCardText',
+                                        'props': {
+                                            'class': 'd-flex align-center',
+                                        },
+                                        'content': [
+                                            {
+                                                'component': 'VAvatar',
+                                                'props': {
+                                                    'rounded': True,
+                                                    'variant': 'text',
+                                                    'class': 'me-3'
+                                                },
+                                                'content': [
+                                                    {
+                                                        'component': 'VIcon',
+                                                        'props': {
+                                                            'icon': 'mdi-movie-outline',
+                                                            'size': '28'
+                                                        }
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                'component': 'div',
+                                                'content': [
+                                                    {
+                                                        'component': 'span',
+                                                        'props': {
+                                                            'class': 'text-caption'
+                                                        },
+                                                        'text': '电影数量'
+                                                    },
+                                                    {
+                                                        'component': 'div',
+                                                        'props': {
+                                                            'class': 'd-flex align-center flex-wrap'
+                                                        },
+                                                        'content': [
+                                                            {
+                                                                'component': 'span',
+                                                                'props': {
+                                                                    'class': 'text-h6'
+                                                                },
+                                                                'text': str(movies_count)
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    # 剧集数量
+                    {
+                        'component': 'VCol',
+                        'props': {
+                            'cols': 12,
+                            'md': 3,
+                            'sm': 6
+                        },
+                        'content': [
+                            {
+                                'component': 'VCard',
+                                'props': {
+                                    'variant': 'tonal',
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VCardText',
+                                        'props': {
+                                            'class': 'd-flex align-center',
+                                        },
+                                        'content': [
+                                            {
+                                                'component': 'VAvatar',
+                                                'props': {
+                                                    'rounded': True,
+                                                    'variant': 'text',
+                                                    'class': 'me-3'
+                                                },
+                                                'content': [
+                                                    {
+                                                        'component': 'VIcon',
+                                                        'props': {
+                                                            'icon': 'mdi-television-classic',
+                                                            'size': '28'
+                                                        }
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                'component': 'div',
+                                                'content': [
+                                                    {
+                                                        'component': 'span',
+                                                        'props': {
+                                                            'class': 'text-caption'
+                                                        },
+                                                        'text': '剧集数量'
+                                                    },
+                                                    {
+                                                        'component': 'div',
+                                                        'props': {
+                                                            'class': 'd-flex align-center flex-wrap'
+                                                        },
+                                                        'content': [
+                                                            {
+                                                                'component': 'span',
+                                                                'props': {
+                                                                    'class': 'text-h6'
+                                                                },
+                                                                'text': str(tv_count)
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+
+        # 如果没有历史记录
         if not historys:
-            return [
+            return header_elements + [
                 {
                     'component': 'div',
-                    'text': '暂无数据',
+                    'text': '暂无同步记录',
                     'props': {
-                        'class': 'text-center',
+                        'class': 'text-center mt-5',
                     }
                 }
             ]
+
         # 数据按时间降序排序
         historys = sorted(historys, key=lambda x: x.get('time'), reverse=True)
+
         # 拼装页面
         contents = []
         for history in historys:
@@ -438,7 +859,7 @@ class TraktSync(_PluginBase):
                 }
             )
 
-        return [
+        return header_elements + [
             {
                 'component': 'div',
                 'props': {
@@ -452,14 +873,14 @@ class TraktSync(_PluginBase):
         """注册常驻定时服务"""
         services = []
 
-        # Token 自动刷新服务（每天检查一次，提前7天自动刷新）
+        # Token 自动刷新服务（每72小时检查一次，提前7天自动刷新）
         if self._enabled and self._refresh_token:
             services.append({
                 "id": "TraktTokenRefresh",
                 "name": "Trakt Token自动刷新",
                 "trigger": "interval",
                 "func": self.__refresh_access_token,
-                "kwargs": {"days": 1}
+                "kwargs": {"hours": 72}
             })
 
         # 同步服务
@@ -541,6 +962,18 @@ class TraktSync(_PluginBase):
         """注册API"""
         return [
             {
+                "path": "/sync",
+                "endpoint": self.api_sync,
+                "methods": ["POST"],
+                "summary": "触发Trakt想看同步"
+            },
+            {
+                "path": "/sync_download",
+                "endpoint": self.api_sync_download,
+                "methods": ["POST"],
+                "summary": "触发Trakt想看同步并下载"
+            },
+            {
                 "path": "/delete_history",
                 "endpoint": self.delete_history,
                 "methods": ["GET"],
@@ -594,43 +1027,49 @@ class TraktSync(_PluginBase):
         # 是否启用搜索下载
         enable_download = force_download or self._auto_download
 
-        # 同步电影
-        movies = self.__get_watchlist_movies()
-        if movies:
-            logger.info(f"获取到 {len(movies)} 部Trakt想看电影")
-            for item in movies:
-                try:
-                    movie_data = item.get("movie", {})
-                    result = self.__sync_movie(movie_data, enable_download, history)
-                    if result:
-                        if result.get("is_new"):
-                            stats["movies_added"] += 1
-                        else:
-                            stats["movies_exists"] += 1
-                        # 添加到历史记录
-                        history.append(result.get("history"))
-                except Exception as e:
-                    logger.error(f"同步电影失败: {str(e)}")
-                    stats["errors"] += 1
+        # 同步电影（根据 sync_type 判断是否需要同步）
+        if self._sync_type in ["all", "movie"]:
+            movies = self.__get_watchlist_movies()
+            if movies:
+                logger.info(f"获取到 {len(movies)} 部Trakt想看电影")
+                for item in movies:
+                    try:
+                        movie_data = item.get("movie", {})
+                        result = self.__sync_movie(movie_data, enable_download, history)
+                        if result:
+                            if result.get("is_new"):
+                                stats["movies_added"] += 1
+                            else:
+                                stats["movies_exists"] += 1
+                            # 添加到历史记录
+                            history.append(result.get("history"))
+                    except Exception as e:
+                        logger.error(f"同步电影失败: {str(e)}")
+                        stats["errors"] += 1
 
-        # 同步剧集
-        shows = self.__get_watchlist_shows()
-        if shows:
-            logger.info(f"获取到 {len(shows)} 部Trakt想看剧集")
-            for item in shows:
-                try:
-                    show_data = item.get("show", {})
-                    result = self.__sync_show(show_data, enable_download, history)
-                    if result:
-                        if result.get("is_new"):
-                            stats["shows_added"] += 1
-                        else:
-                            stats["shows_exists"] += 1
-                        # 添加到历史记录
-                        history.append(result.get("history"))
-                except Exception as e:
-                    logger.error(f"同步剧集失败: {str(e)}")
-                    stats["errors"] += 1
+        # 同步剧集（根据 sync_type 判断是否需要同步）
+        if self._sync_type in ["all", "tv"]:
+            shows = self.__get_watchlist_shows()
+            if shows:
+                logger.info(f"获取到 {len(shows)} 部Trakt想看剧集")
+                for item in shows:
+                    try:
+                        show_data = item.get("show", {})
+                        result = self.__sync_show(show_data, enable_download, history)
+                        if result:
+                            if result.get("is_new"):
+                                stats["shows_added"] += 1
+                            else:
+                                stats["shows_exists"] += 1
+                            # 添加到历史记录
+                            history.append(result.get("history"))
+                    except Exception as e:
+                        logger.error(f"同步剧集失败: {str(e)}")
+                        stats["errors"] += 1
+
+        # 更新上次同步时间
+        self._last_sync_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.__update_config()
 
         # 保存历史记录
         self.save_data('history', history)
@@ -722,9 +1161,18 @@ class TraktSync(_PluginBase):
             )
 
             if not response or response.status_code != 200:
-                logger.error(f"Token刷新失败: {response.status_code if response else 'No response'}")
+                error_msg = f"Token刷新失败: {response.status_code if response else 'No response'}"
+                logger.error(error_msg)
                 if response:
                     logger.error(f"响应内容: {response.text}")
+
+                # 发送通知
+                if self._notify:
+                    self.post_message(
+                        mtype=NotificationType.SiteMessage,
+                        title="Trakt Token刷新失败",
+                        text=f"刷新失败，请检查配置\n错误：{error_msg}"
+                    )
                 return False
 
             token_data = response.json()
@@ -746,7 +1194,16 @@ class TraktSync(_PluginBase):
             return True
 
         except Exception as e:
-            logger.error(f"Token刷新异常: {str(e)}")
+            error_msg = f"Token刷新异常: {str(e)}"
+            logger.error(error_msg)
+
+            # 发送通知
+            if self._notify:
+                self.post_message(
+                    mtype=NotificationType.SiteMessage,
+                    title="Trakt Token刷新异常",
+                    text=f"刷新过程中发生异常\n错误：{error_msg}"
+                )
             return False
 
     def __get_watchlist_movies(self) -> Optional[List[dict]]:
@@ -838,7 +1295,7 @@ class TraktSync(_PluginBase):
 
         # 检查是否已存在
         downloadchain = DownloadChain()
-        exist_flag, _ = downloadchain.get_no_exists_info(meta=meta, mediainfo=mediainfo)
+        exist_flag, no_exists = downloadchain.get_no_exists_info(meta=meta, mediainfo=mediainfo)
 
         if exist_flag:
             logger.info(f'{mediainfo.title_year} 媒体库中已存在')
@@ -851,8 +1308,9 @@ class TraktSync(_PluginBase):
         else:
             # 如果启用搜索下载
             if enable_download:
-                is_new = self.__search_and_download_movie(mediainfo, meta)
-                action = "download" if is_new else "subscribe"
+                result = self.__search_and_download_movie_with_action(mediainfo, meta, no_exists)
+                is_new = result.get("is_new")
+                action = result.get("action")
             else:
                 # 添加订阅
                 is_new = self.__add_subscribe(mediainfo, meta)
@@ -909,16 +1367,24 @@ class TraktSync(_PluginBase):
             logger.error(f"无法识别剧集: {title} ({year})")
             return None
 
-        # 检查是否已订阅
-        if self.__is_subscribed(tmdb_id, MediaType.TV):
+        # 检查是否已存在（与doubansync保持一致）
+        downloadchain = DownloadChain()
+        exist_flag, no_exists = downloadchain.get_no_exists_info(meta=meta, mediainfo=mediainfo)
+
+        if exist_flag:
+            logger.info(f'{mediainfo.title_year} 媒体库中已完整')
+            action = "exist"
+            is_new = False
+        elif self.__is_subscribed(tmdb_id, MediaType.TV):
             logger.info(f'{mediainfo.title_year} 已在订阅中')
             action = "subscribe"
             is_new = False
         else:
             # 如果启用搜索下载
             if enable_download:
-                is_new = self.__search_and_download_show(mediainfo, meta)
-                action = "download" if is_new else "subscribe"
+                result = self.__search_and_download_show_with_action(mediainfo, meta, no_exists)
+                is_new = result.get("is_new")
+                action = result.get("action")
             else:
                 # 添加订阅
                 is_new = self.__add_subscribe(mediainfo, meta)
@@ -958,6 +1424,9 @@ class TraktSync(_PluginBase):
         :return: 是否成功
         """
         try:
+            # 如果未开启搜索下载，则添加为暂停状态（S），否则为新建状态（N）
+            state = 'N' if self._auto_download else 'S'
+
             subscribe_id, message = SubscribeChain().add(
                 title=mediainfo.title,
                 year=mediainfo.year,
@@ -965,10 +1434,12 @@ class TraktSync(_PluginBase):
                 tmdbid=mediainfo.tmdb_id,
                 season=meta.begin_season if mediainfo.type == MediaType.TV else None,
                 exist_ok=True,
-                username="Trakt想看"
+                username="Trakt想看",
+                state=state  # 设置订阅状态
             )
             if subscribe_id:
-                logger.info(f"添加订阅成功: {mediainfo.title_year}")
+                status_text = "正常订阅" if self._auto_download else "暂停订阅"
+                logger.info(f"添加订阅成功: {mediainfo.title_year} ({status_text})")
                 return True
             else:
                 logger.error(f"添加订阅失败: {mediainfo.title_year} - {message}")
@@ -976,6 +1447,47 @@ class TraktSync(_PluginBase):
         except Exception as e:
             logger.error(f"添加订阅异常: {mediainfo.title_year} - {str(e)}")
             return False
+
+    def __search_and_download_movie_with_action(self, mediainfo, meta, no_exists) -> dict:
+        """
+        搜索并下载电影（带action返回）
+        :param mediainfo: 媒体信息
+        :param meta: 元数据
+        :param no_exists: 缺失信息
+        :return: 包含is_new和action的字典
+        """
+        downloadchain = DownloadChain()
+        searchchain = SearchChain()
+        systemconfig = SystemConfigOper()
+
+        # 搜索资源
+        logger.info(f"媒体库中不存在，开启搜索下载，开始搜索 {mediainfo.title_year} 的资源...")
+        filter_results = searchchain.process(
+            mediainfo=mediainfo,
+            no_exists=no_exists,
+            sites=systemconfig.get(SystemConfigKey.RssSites),
+            rule_groups=systemconfig.get(SystemConfigKey.SubscribeFilterRuleGroups)
+        )
+
+        if not filter_results:
+            logger.info(f"未找到符合条件的资源，添加订阅 {mediainfo.title_year}")
+            is_new = self.__add_subscribe(mediainfo, meta)
+            return {"is_new": is_new, "action": "subscribe"}
+
+        # 找到资源，开始下载
+        logger.info(f"找到符合条件的资源，开始下载 {mediainfo.title_year} ...")
+        download_id = downloadchain.download_single(
+            context=filter_results[0],
+            username="Trakt想看"
+        )
+
+        if download_id:
+            logger.info(f"下载任务已添加: {mediainfo.title_year}")
+            return {"is_new": True, "action": "download"}
+        else:
+            logger.info(f"下载失败，添加订阅 {mediainfo.title_year}")
+            is_new = self.__add_subscribe(mediainfo, meta)
+            return {"is_new": is_new, "action": "subscribe"}
 
     def __search_and_download_movie(self, mediainfo, meta) -> bool:
         """
@@ -1017,6 +1529,74 @@ class TraktSync(_PluginBase):
         else:
             logger.warning(f"下载失败: {mediainfo.title_year}，添加订阅")
             return self.__add_subscribe(mediainfo, meta)
+
+    def __search_and_download_show_with_action(self, mediainfo, meta, no_exists) -> dict:
+        """
+        搜索并下载剧集（带action返回）
+        :param mediainfo: 媒体信息
+        :param meta: 元数据
+        :param no_exists: 缺失剧集信息
+        :return: 包含is_new和action的字典
+        """
+        downloadchain = DownloadChain()
+        searchchain = SearchChain()
+        systemconfig = SystemConfigOper()
+        subscribeoper = SubscribeOper()
+
+        # 搜索资源
+        logger.info(f"媒体库中不存在或不完整，开启搜索下载，开始搜索 {mediainfo.title_year} 的资源...")
+        filter_results = searchchain.process(
+            mediainfo=mediainfo,
+            no_exists=no_exists,
+            sites=systemconfig.get(SystemConfigKey.RssSites),
+            rule_groups=systemconfig.get(SystemConfigKey.SubscribeFilterRuleGroups)
+        )
+
+        if not filter_results:
+            logger.info(f"未找到符合条件的资源，添加订阅 {mediainfo.title_year}")
+            is_new = self.__add_subscribe(mediainfo, meta)
+            return {"is_new": is_new, "action": "subscribe"}
+
+        # 找到资源，开始批量下载
+        logger.info(f"找到符合条件的资源，开始下载 {mediainfo.title_year} ...")
+        downloaded_list, lefts = downloadchain.batch_download(
+            contexts=filter_results,
+            no_exists=no_exists,
+            username="Trakt想看"
+        )
+
+        if not downloaded_list and not lefts:
+            # 没有下载任何内容
+            logger.info(f"下载失败，添加订阅 {mediainfo.title_year}")
+            is_new = self.__add_subscribe(mediainfo, meta)
+            return {"is_new": is_new, "action": "subscribe"}
+
+        if lefts:
+            # 有未下载完的剧集，添加订阅
+            logger.info(f"下载失败或未下载完所有剧集，添加订阅 {mediainfo.title_year}")
+            sub_id, message = self.__add_subscribe(mediainfo, meta)
+
+            if sub_id:
+                # 更新订阅信息
+                logger.info(f"根据缺失剧集更新订阅信息 {mediainfo.title_year}")
+                subscribe = subscribeoper.get(sub_id)
+                if subscribe:
+                    SubscribeChain().finish_subscribe_or_not(
+                        subscribe=subscribe,
+                        meta=meta,
+                        mediainfo=mediainfo,
+                        downloads=downloaded_list,
+                        lefts=lefts
+                    )
+
+            # 有下载内容，但未完成
+            if downloaded_list:
+                return {"is_new": True, "action": "download"}
+            else:
+                return {"is_new": True, "action": "subscribe"}
+        else:
+            # 全部下载完成
+            return {"is_new": True, "action": "download"}
 
     def __search_and_download_show(self, mediainfo, meta) -> bool:
         """
@@ -1104,19 +1684,121 @@ class TraktSync(_PluginBase):
             text=text
         )
 
-    def delete_history(self, tmdbid: str, apikey: str):
+    def get_actions(self) -> List[Dict[str, Any]]:
         """
-        删除同步历史记录
+        注册工作流动作
+        """
+        return [
+            {
+                "id": "trakt_sync",
+                "name": "同步Trakt想看",
+                "func": self.action_sync,
+                "kwargs": {}
+            },
+            {
+                "id": "trakt_sync_download",
+                "name": "同步并下载Trakt想看",
+                "func": self.action_sync_download,
+                "kwargs": {}
+            }
+        ]
+
+    def api_sync(self, apikey: str):
+        """
+        API端点：触发同步
         """
         from app import schemas
 
         if apikey != settings.API_TOKEN:
             return schemas.Response(success=False, message="API密钥错误")
+
+        try:
+            logger.info("通过API触发Trakt想看同步")
+            self.sync(force_download=False)
+            return schemas.Response(success=True, message="同步任务已启动")
+        except Exception as e:
+            logger.error(f"API同步失败: {str(e)}")
+            return schemas.Response(success=False, message=f"同步失败: {str(e)}")
+
+    def api_sync_download(self, apikey: str):
+        """
+        API端点：触发同步并下载
+        """
+        from app import schemas
+
+        if apikey != settings.API_TOKEN:
+            return schemas.Response(success=False, message="API密钥错误")
+
+        try:
+            logger.info("通过API触发Trakt想看同步并下载")
+            self.sync(force_download=True)
+            return schemas.Response(success=True, message="同步下载任务已启动")
+        except Exception as e:
+            logger.error(f"API同步下载失败: {str(e)}")
+            return schemas.Response(success=False, message=f"同步下载失败: {str(e)}")
+
+    def action_sync(self, action_content):
+        """
+        工作流动作：同步Trakt想看
+        """
+        try:
+            logger.info("工作流触发Trakt想看同步")
+            self.sync(force_download=False)
+            return True, action_content
+        except Exception as e:
+            logger.error(f"工作流同步失败: {str(e)}")
+            return False, action_content
+
+    def action_sync_download(self, action_content):
+        """
+        工作流动作：同步并下载Trakt想看
+        """
+        try:
+            logger.info("工作流触发Trakt想看同步并下载")
+            self.sync(force_download=True)
+            return True, action_content
+        except Exception as e:
+            logger.error(f"工作流同步下载失败: {str(e)}")
+            return False, action_content
+
+    def delete_history(self, tmdbid: str, apikey: str):
+        """
+        删除同步历史记录并同步删除订阅
+        """
+        from app import schemas
+
+        if apikey != settings.API_TOKEN:
+            return schemas.Response(success=False, message="API密钥错误")
+
         # 历史记录
         historys = self.get_data('history')
         if not historys:
             return schemas.Response(success=False, message="未找到历史记录")
-        # 删除指定记录
+
+        # 查找要删除的记录
+        target_history = None
+        for h in historys:
+            if str(h.get("tmdbid")) == str(tmdbid):
+                target_history = h
+                break
+
+        if not target_history:
+            return schemas.Response(success=False, message="未找到指定记录")
+
+        # 删除历史记录
         historys = [h for h in historys if str(h.get("tmdbid")) != str(tmdbid)]
         self.save_data('history', historys)
-        return schemas.Response(success=True, message="删除成功")
+
+        # 删除对应的订阅
+        try:
+            subscribeoper = SubscribeOper()
+            subscribes = subscribeoper.list_by_tmdbid(tmdbid=int(tmdbid))
+            if subscribes:
+                for subscribe in subscribes:
+                    subscribeoper.delete(subscribe.id)
+                    logger.info(f"已删除订阅: {target_history.get('title')} (TMDB: {tmdbid})")
+        except Exception as e:
+            logger.error(f"删除订阅失败: {str(e)}")
+            return schemas.Response(success=True, message=f"历史记录已删除，但订阅删除失败: {str(e)}")
+
+        return schemas.Response(success=True, message="历史记录和订阅已删除")

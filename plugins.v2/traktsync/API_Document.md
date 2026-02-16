@@ -370,8 +370,287 @@ TraktSync 插件将 Trakt API 数据映射到 MoviePilot 所需格式：
 
 ---
 
+## 插件 API 端点
+
+TraktSync 插件提供以下 API 端点用于触发同步和管理历史记录。
+
+### 触发同步
+
+**端点**: `POST /api/v1/plugin/TraktSync/sync`
+
+**请求参数**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|------|------|
+| apikey | string | 是 | MoviePilot API Token |
+
+**cURL 示例**:
+
+```bash
+curl -X POST "http://localhost:3000/api/v1/plugin/TraktSync/sync?apikey=YOUR_API_TOKEN"
+```
+
+**成功响应**:
+
+```json
+{
+  "success": true,
+  "message": "同步任务已启动"
+}
+```
+
+**说明**:
+- 触发Trakt想看列表同步
+- 仅添加订阅，不搜索下载
+- 异步执行，立即返回
+
+---
+
+### 触发同步并下载
+
+**端点**: `POST /api/v1/plugin/TraktSync/sync_download`
+
+**请求参数**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|------|------|
+| apikey | string | 是 | MoviePilot API Token |
+
+**cURL 示例**:
+
+```bash
+curl -X POST "http://localhost:3000/api/v1/plugin/TraktSync/sync_download?apikey=YOUR_API_TOKEN"
+```
+
+**成功响应**:
+
+```json
+{
+  "success": true,
+  "message": "同步下载任务已启动"
+}
+```
+
+**说明**:
+- 触发Trakt想看列表同步
+- 优先搜索下载，失败时添加订阅
+- 异步执行，立即返回
+
+---
+
+### 删除历史记录
+
+**端点**: `GET /api/v1/plugin/TraktSync/delete_history`
+
+**请求参数**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|------|------|
+| tmdbid | string | 是 | TMDB ID |
+| apikey | string | 是 | MoviePilot API Token |
+
+**cURL 示例**:
+
+```bash
+curl -X GET "http://localhost:3000/api/v1/plugin/TraktSync/delete_history?tmdbid=155&apikey=YOUR_API_TOKEN"
+```
+
+**成功响应**:
+
+```json
+{
+  "success": true,
+  "message": "删除成功"
+}
+```
+
+**错误响应**:
+
+```json
+{
+  "success": false,
+  "message": "API密钥错误"
+}
+```
+
+或
+
+```json
+{
+  "success": false,
+  "message": "未找到历史记录"
+}
+```
+
+**说明**:
+- 此端点用于从插件详情页删除单条同步历史记录
+- 需要提供有效的 MoviePilot API Token
+- 删除操作不可逆
+
+---
+
+## 插件远程命令
+
+TraktSync 插件支持以下远程命令，可通过 MoviePilot 的消息通知渠道（如 Telegram、WeChat、Slack）触发。
+
+### 同步 Trakt 想看
+
+**命令**: `/trakt_sync`
+
+**分类**: 订阅
+
+**描述**: 同步 Trakt 想看列表，仅添加订阅（不搜索下载）
+
+**执行流程**:
+1. 获取 Trakt 想看电影和剧集列表
+2. 检查媒体库是否已存在
+3. 检查是否已订阅
+4. 未存在且未订阅的内容添加订阅
+5. 记录同步历史
+
+**使用场景**:
+- 手动触发同步
+- 快速添加订阅，不消耗下载资源
+
+---
+
+### 同步并下载 Trakt 想看
+
+**命令**: `/trakt_download`
+
+**分类**: 订阅
+
+**描述**: 同步 Trakt 想看列表，优先搜索下载，失败时添加订阅
+
+**执行流程**:
+1. 获取 Trakt 想看电影和剧集列表
+2. 检查媒体库是否已存在
+3. 检查是否已订阅
+4. 未存在的内容：
+   - 搜索资源
+   - 找到资源 → 立即下载
+   - 未找到资源或下载失败 → 添加订阅
+5. 记录同步历史
+
+**使用场景**:
+- 希望立即获取资源
+- 资源丰富的站点环境
+- 需要快速完成观看需求
+
+**注意**:
+- 强制启用搜索下载功能，无论插件配置中是否开启
+- 会消耗站点流量和下载器资源
+- 剧集可能部分下载成功，剩余部分自动添加订阅
+
+---
+
+## 工作流动作（Workflow Actions）
+
+TraktSync 插件注册了以下工作流动作，可在 MoviePilot 工作流编排中使用。
+
+### 同步Trakt想看
+
+**动作ID**: `trakt_sync`
+
+**动作名称**: 同步Trakt想看
+
+**功能**: 同步Trakt想看列表，仅添加订阅
+
+**参数**: 无
+
+**返回**:
+- `成功`: `True, ActionContent`
+- `失败`: `False, ActionContent`
+
+**使用场景**:
+- 定时工作流中自动同步
+- 与其他动作组合使用
+- 条件触发同步
+
+---
+
+### 同步并下载Trakt想看
+
+**动作ID**: `trakt_sync_download`
+
+**动作名称**: 同步并下载Trakt想看
+
+**功能**: 同步Trakt想看列表，优先搜索下载
+
+**参数**: 无
+
+**返回**:
+- `成功`: `True, ActionContent`
+- `失败`: `False, ActionContent`
+
+**使用场景**:
+- 立即获取资源的工作流
+- 资源监控触发后的下载动作
+- 与通知、过滤等动作组合
+
+---
+
+## 集成示例
+
+### Python 脚本调用
+
+```python
+import requests
+
+# MoviePilot配置
+base_url = "http://localhost:3000"
+api_token = "YOUR_API_TOKEN"
+
+# 触发同步
+response = requests.post(
+    f"{base_url}/api/v1/plugin/TraktSync/sync",
+    params={"apikey": api_token}
+)
+print(response.json())
+
+# 触发同步并下载
+response = requests.post(
+    f"{base_url}/api/v1/plugin/TraktSync/sync_download",
+    params={"apikey": api_token}
+)
+print(response.json())
+```
+
+### Bash脚本调用
+
+```bash
+#!/bin/bash
+
+BASE_URL="http://localhost:3000"
+API_TOKEN="YOUR_API_TOKEN"
+
+# 触发同步
+curl -X POST "${BASE_URL}/api/v1/plugin/TraktSync/sync?apikey=${API_TOKEN}"
+
+# 触发同步并下载
+curl -X POST "${BASE_URL}/api/v1/plugin/TraktSync/sync_download?apikey=${API_TOKEN}"
+```
+
+### 工作流配置示例
+
+```yaml
+# 示例：每天凌晨2点同步Trakt想看
+workflow:
+  name: "每日Trakt同步"
+  trigger:
+    type: "cron"
+    cron: "0 2 * * *"
+  actions:
+    - plugin: "TraktSync"
+      action: "trakt_sync"
+```
+
+---
+
 ## 更新历史
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
 | 1.0 | 2024-02-15 | 初始版本 |
+| 1.1 | 2026-02-15 | 新增插件API端点文档；新增远程命令说明 |
+| 1.2 | 2026-02-15 | 新增同步API端点；新增工作流动作注册；新增集成示例 |
