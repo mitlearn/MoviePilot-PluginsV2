@@ -157,6 +157,7 @@ class TraktSync(_PluginBase):
             "last_sync_time": self._last_sync_time,
             "_tabs": self._tabs,
             "custom_lists": self._custom_lists,
+            "use_proxy": self._use_proxy,
         }
         if self._token_expires_at:
             config["token_expires_at"] = self._token_expires_at.isoformat()
@@ -1521,6 +1522,9 @@ class TraktSync(_PluginBase):
             # 根据"添加并启用订阅"开关决定订阅状态
             state = 'N' if self._add_and_enable else 'S'
 
+            # 添加调试日志
+            logger.info(f"订阅配置: add_and_enable={self._add_and_enable}, state={state}")
+
             subscribe_id, message = SubscribeChain().add(
                 title=mediainfo.title,
                 year=mediainfo.year,
@@ -1533,7 +1537,7 @@ class TraktSync(_PluginBase):
             )
             if subscribe_id:
                 status_text = "激活订阅" if self._add_and_enable else "暂停订阅"
-                logger.info(f"添加订阅成功: {mediainfo.title_year} ({status_text})")
+                logger.info(f"添加订阅成功: {mediainfo.title_year} (状态: {status_text}, state={state})")
                 return True
             else:
                 logger.error(f"添加订阅失败: {mediainfo.title_year} - {message}")
