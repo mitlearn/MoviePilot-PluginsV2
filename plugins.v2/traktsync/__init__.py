@@ -1022,15 +1022,16 @@ class TraktSync(_PluginBase):
                     "action": "trakt_sync"
                 }
             },
-            {
-                "cmd": "/trakt_download",
-                "event": EventType.PluginAction,
-                "desc": "同步并下载Trakt想看",
-                "category": "订阅",
-                "data": {
-                    "action": "trakt_download"
-                }
-            },
+            # 暂时注释以便测试
+            # {
+            #     "cmd": "/trakt_download",
+            #     "event": EventType.PluginAction,
+            #     "desc": "同步并下载Trakt想看",
+            #     "category": "订阅",
+            #     "data": {
+            #         "action": "trakt_download"
+            #     }
+            # },
             {
                 "cmd": "/trakt_code",
                 "event": EventType.PluginAction,
@@ -1051,7 +1052,9 @@ class TraktSync(_PluginBase):
                 return
 
             action = event_data.get("action")
-            if action not in ["trakt_sync", "trakt_download", "trakt_code"]:
+            # 暂时注释 trakt_download 以便测试
+            # if action not in ["trakt_sync", "trakt_download", "trakt_code"]:
+            if action not in ["trakt_sync", "trakt_code"]:
                 return
 
             # 提交授权码
@@ -1091,21 +1094,22 @@ class TraktSync(_PluginBase):
                     )
                 return
 
-            # 同步并下载（强制启用订阅）
-            if action == "trakt_download":
-                logger.info(f"收到命令，开始执行Trakt想看同步并下载（强制启用订阅）...")
-                self.post_message(
-                    channel=event_data.get("channel"),
-                    title="开始同步并下载Trakt想看 ...",
-                    userid=event_data.get("user")
-                )
-                self.sync_download()
-                self.post_message(
-                    channel=event.event_data.get("channel"),
-                    title="同步并下载Trakt想看数据完成！",
-                    userid=event.event_data.get("user")
-                )
-                return
+            # 暂时注释以便测试
+            # # 同步并下载（强制启用订阅）
+            # if action == "trakt_download":
+            #     logger.info(f"收到命令，开始执行Trakt想看同步并下载（强制启用订阅）...")
+            #     self.post_message(
+            #         channel=event_data.get("channel"),
+            #         title="开始同步并下载Trakt想看 ...",
+            #         userid=event_data.get("user")
+            #     )
+            #     self.sync_download()
+            #     self.post_message(
+            #         channel=event.event_data.get("channel"),
+            #         title="同步并下载Trakt想看数据完成！",
+            #         userid=event.event_data.get("user")
+            #     )
+            #     return
 
             # Watchlist同步
             logger.info(f"收到命令，开始执行Trakt想看同步 ...")
@@ -1134,12 +1138,13 @@ class TraktSync(_PluginBase):
                 "methods": ["POST"],
                 "summary": "触发Trakt想看同步"
             },
-            {
-                "path": "/sync_download",
-                "endpoint": self.api_sync_download,
-                "methods": ["POST"],
-                "summary": "触发Trakt想看同步并下载"
-            },
+            # 暂时注释以便测试
+            # {
+            #     "path": "/sync_download",
+            #     "endpoint": self.api_sync_download,
+            #     "methods": ["POST"],
+            #     "summary": "触发Trakt想看同步并下载"
+            # },
             {
                 "path": "/sync_custom_lists",
                 "endpoint": self.api_sync_custom_lists,
@@ -1332,10 +1337,10 @@ class TraktSync(_PluginBase):
                    f"已存在剧集 {stats['shows_exists']} 部，"
                    f"错误 {stats['errors']} 个")
 
+    # 暂时注释以便测试 - sync_download 方法
+    """
     def sync_download(self):
-        """
-        同步Trakt想看列表并下载（强制启用订阅，无视配置）
-        """
+        # 同步Trakt想看列表并下载（强制启用订阅，无视配置）
         if not self._client_id or not self._client_secret or not self._refresh_token:
             logger.error("Trakt配置不完整，请检查Client ID、Client Secret和Refresh Token")
             return
@@ -1471,6 +1476,7 @@ class TraktSync(_PluginBase):
                    f"已存在电影 {stats['movies_exists']} 部，"
                    f"已存在剧集 {stats['shows_exists']} 部，"
                    f"错误 {stats['errors']} 个")
+    """
 
     def __get_token_from_code(self) -> bool:
         """
@@ -1891,9 +1897,10 @@ class TraktSync(_PluginBase):
         """API端点：触发同步"""
         return self.__api_wrapper(apikey, "Trakt想看同步", self.sync)
 
-    def api_sync_download(self, apikey: str):
-        """API端点：触发同步并下载（强制启用订阅）"""
-        return self.__api_wrapper(apikey, "Trakt想看同步并下载", self.sync_download)
+    # 暂时注释以便测试
+    # def api_sync_download(self, apikey: str):
+    #     """API端点：触发同步并下载（强制启用订阅）"""
+    #     return self.__api_wrapper(apikey, "Trakt想看同步并下载", self.sync_download)
 
     def api_sync_custom_lists(self, apikey: str):
         """API端点：触发自定义列表同步"""
@@ -2023,9 +2030,10 @@ class TraktSync(_PluginBase):
         """工作流动作：同步Trakt想看"""
         return self.__action_wrapper(action_content, "Trakt想看同步", self.sync)
 
-    def action_sync_download(self, action_content):
-        """工作流动作：同步并下载Trakt想看（强制启用订阅）"""
-        return self.__action_wrapper(action_content, "Trakt想看同步并下载", self.sync_download)
+    # 暂时注释以便测试
+    # def action_sync_download(self, action_content):
+    #     """工作流动作：同步并下载Trakt想看（强制启用订阅）"""
+    #     return self.__action_wrapper(action_content, "Trakt想看同步并下载", self.sync_download)
 
     def action_sync_custom_lists(self, action_content):
         """工作流动作：同步Trakt自定义列表"""
