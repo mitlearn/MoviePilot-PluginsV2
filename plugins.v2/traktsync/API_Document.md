@@ -20,22 +20,51 @@ Trakt API 是一个 RESTful API，用于访问 Trakt.tv 的影视追踪功能。
 
 - **Name**: 应用名称（如：MoviePilot TraktSync）
 - **Description**: 应用描述
-- **Redirect URI**: `urn:ietf:wg:oauth:2.0:oob`（用于获取授权码的特殊URI）
+- **Redirect URI**:
+  - **自动授权模式**（推荐）: `http(s)://your-domain.com/api/v1/plugin/traktsync/auth`
+  - **手动授权模式**: `urn:ietf:wg:oauth:2.0:oob`
 - **Permissions**: 勾选所需权限
 
 创建后获得：
 - **Client ID**: 应用标识
 - **Client Secret**: 应用密钥
 
-### 2. 获取授权码（手动操作）
+### 2. 获取授权码
 
-访问以下 URL 获取授权码：
+#### 方式一：自动授权（推荐）
 
+**前提条件**:
+- 已配置MoviePilot访问域名
+- 域名可从外网访问
+
+**流程**:
+1. 在插件配置中填写MoviePilot访问域名（如：`https://moviepilot.example.com`）
+2. 访问插件日志中输出的授权链接
+3. 登录Trakt并授权
+4. 授权成功后自动完成，无需手动操作
+
+**授权URL格式**:
+```
+https://trakt.tv/oauth/authorize?response_type=code&client_id={CLIENT_ID}&redirect_uri=http(s)://your-domain.com/api/v1/plugin/traktsync/auth
+```
+
+#### 方式二：手动授权
+
+**适用场景**:
+- 未配置MoviePilot访问域名
+- 内网环境无法从外网访问
+
+**流程**:
+1. 访问授权链接（插件日志中会输出）
+2. 登录Trakt并授权
+3. 复制页面显示的授权码
+4. 方式A：填入插件配置页面的【授权码】字段
+5. 方式B：使用 `/trakt_code 授权码` 命令提交
+
+**授权URL格式**:
 ```
 https://trakt.tv/oauth/authorize?response_type=code&client_id={CLIENT_ID}&redirect_uri=urn:ietf:wg:oauth:2.0:oob
 ```
-
-用户登录并授权后，会显示授权码（Authorization Code）。
 
 ### 3. 获取 Access Token 和 Refresh Token
 
@@ -593,6 +622,97 @@ curl -X GET "http://localhost:3000/api/v1/plugin/TraktSync/delete_history?tmdbid
 
 ---
 
+### Trakt OAuth 授权回调
+
+**端点**: `GET /api/v1/plugin/TraktSync/auth`
+
+**请求参数**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|------|------|
+| code | string | 是 | Trakt返回的授权码 |
+
+**说明**:
+- 此端点用于接收Trakt OAuth授权回调
+- 当用户在插件配置中填写了MoviePilot访问域名时启用
+- 实现自动化授权流程，无需手动复制粘贴授权码
+
+**使用流程**:
+
+1. **配置Trakt应用**（仅在配置了MoviePilot域名时）
+   - Redirect URI: `http(s)://your-domain.com/api/v1/plugin/TraktSync/auth`
+
+2. **用户访问授权链接**
+   ```
+   https://trakt.tv/oauth/authorize?response_type=code&client_id={CLIENT_ID}&redirect_uri=http(s)://your-domain.com/api/v1/plugin/TraktSync/auth
+   ```
+
+3. **授权完成后**
+   - Trakt自动重定向到回调地址
+   - 插件接收授权码并自动获取Token
+   - 返回HTML页面显示授权结果
+
+**成功响应**:
+
+返回HTML页面（状态码 200）：
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Trakt授权成功</title>
+</head>
+<body>
+    <h1 class="success">✓ 授权成功</h1>
+    <p>Trakt授权已完成，您可以关闭此页面</p>
+    <p>Token有效期至: 2024-05-15 10:30:00</p>
+</body>
+</html>
+```
+
+**错误响应**:
+
+未提供授权码（状态码 400）：
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Trakt授权失败</title>
+</head>
+<body>
+    <h1 class="error">授权失败</h1>
+    <p>未收到授权码，请重试</p>
+</body>
+</html>
+```
+
+获取Token失败（状态码 500）：
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Trakt授权失败</title>
+</head>
+<body>
+    <h1 class="error">授权失败</h1>
+    <p>获取Token失败，请检查配置或重试</p>
+</body>
+</html>
+```
+
+**注意事项**:
+- 仅在配置了MoviePilot访问域名时使用此功能
+- 未配置域名时使用传统方式（手动复制授权码或使用 `/trakt_code` 命令）
+- 域名必须可从外网访问（Trakt需要能够重定向到此地址）
+- 支持HTTP和HTTPS协议
+
+---
+
 ## 插件远程命令
 
 TraktSync 插件支持以下远程命令，可通过 MoviePilot 的消息通知渠道（如 Telegram、WeChat、Slack）触发。
@@ -648,29 +768,53 @@ TraktSync 插件支持以下远程命令，可通过 MoviePilot 的消息通知�
 
 ---
 
-### 同步 Trakt 自定义列表
+### 提交 Trakt 授权码
 
-**命令**: `/trakt_custom_lists`
+**命令**: `/trakt_code <授权码>`
 
 **分类**: 订阅
 
-**描述**: 同步配置的 Trakt 自定义列表
+**描述**: 提交Trakt授权码以更新Token
+
+**使用格式**:
+```
+/trakt_code abc123def456ghi789
+```
 
 **执行流程**:
-1. 读取插件配置中的自定义列表
-2. 逐个获取列表内容
-3. 处理列表中的电影和剧集
-4. 添加订阅或下载
-5. 记录同步历史
+1. 接收用户提交的授权码
+2. 调用Trakt API获取Token
+3. 更新并保存Access Token和Refresh Token
+4. 计算并保存Token过期时间
+5. 返回授权结果
 
 **使用场景**:
-- 同步策划的主题列表（如"漫威电影宇宙"、"必看经典"等）
-- 同步他人分享的列表
-- 批量添加订阅
+- Token过期需要重新授权时
+- 未配置MoviePilot访问域名，无法使用自动授权
+- 收到Token失效通知后快速更新
+
+**获取授权码步骤**:
+1. 访问通知中提供的授权链接（或插件日志中的链接）
+2. 登录Trakt并授权
+3. 复制页面显示的授权码
+4. 使用 `/trakt_code` 命令提交
+
+**成功响应**:
+```
+授权成功
+Token已更新，有效期至 2024-05-15 10:30:00
+```
+
+**失败响应**:
+```
+授权失败
+获取Token失败，请检查授权码是否正确
+```
 
 **注意**:
-- 需要在插件配置中预先设置自定义列表
-- 支持多个列表，用逗号分隔
+- 授权码仅可使用一次
+- 授权码有时效性，建议获取后立即提交
+- 提交成功后会自动保存配置
 
 ---
 
@@ -836,3 +980,4 @@ workflow:
 | 1.1 | 2026-02-15 | 新增插件API端点文档；新增远程命令说明 |
 | 1.2 | 2026-02-15 | 新增同步API端点；新增工作流动作注册；新增集成示例 |
 | 1.3 | 2026-02-15 | 新增Trakt自定义列表API；新增自定义列表同步功能；新增工作流动作和远程命令 |
+| 1.4 | 2026-02-16 | 删除 `/trakt_custom_lists` 远程命令；新增 `/trakt_code` 命令；新增OAuth授权回调API；新增自动授权流程支持 |

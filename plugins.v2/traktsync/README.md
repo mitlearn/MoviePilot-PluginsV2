@@ -8,6 +8,8 @@ TraktSync 是为 MoviePilot 开发的 Trakt.tv 想看列表同步插件。它可
 
 - ✅ 同步 Trakt Watchlist 电影和剧集
 - ✅ 同步 Trakt 自定义列表（Custom Lists）
+- ✅ OAuth自动授权（可选，配置域名后免手动操作）
+- ✅ 远程命令提交授权码（Token失效时快速更新）
 - ✅ 自动识别 TMDB 媒体信息
 - ✅ 自动去重（检查媒体库和订阅列表）
 - ✅ 支持定时自动同步（Cron）
@@ -57,42 +59,86 @@ TraktSync 是为 MoviePilot 开发的 Trakt.tv 想看列表同步插件。它可
 3. 填写应用信息：
    - **Name**: `MoviePilot TraktSync`（或任意名称）
    - **Description**: `MoviePilot Trakt想看同步插件`
-   - **Redirect URI**: `urn:ietf:wg:oauth:2.0:oob` ⚠️ 必须填写这个
+   - **Redirect URI**:
+     - **自动授权模式**（推荐）：`http(s)://your-domain.com/api/v1/plugin/traktsync/auth`
+       - 需要填写你的MoviePilot访问域名
+       - 例如：`https://moviepilot.example.com/api/v1/plugin/traktsync/auth`
+     - **手动授权模式**：`urn:ietf:wg:oauth:2.0:oob`
+       - 用于内网环境或无域名时
    - **Permissions**: 勾选需要的权限（至少勾选读取 Watchlist）
 4. 点击 **CREATE APP**
 5. 保存以下信息：
    - **Client ID**
    - **Client Secret**
 
+> [!TIP]
+> 如果你的MoviePilot有公网域名，强烈推荐使用自动授权模式，授权过程更加便捷！
+
 ### 第二步：获取 Refresh Token
 
-#### 方法一：使用插件自动生成的授权链接（最简单，推荐）
+#### 方法一：自动授权（最简单，推荐）
 
-1. 在插件配置中填写第一步获取的 **Client ID** 和 **Client Secret**
+**前提条件**：
+- 已在插件配置中填写 **MoviePilot访问域名**
+- 域名可从外网访问
+- Trakt应用的Redirect URI使用了域名格式
+
+**步骤**：
+
+1. 在插件配置中填写以下信息：
+   - **Client ID** 和 **Client Secret**（第一步获取）
+   - **MoviePilot访问域名**（如：`https://moviepilot.example.com`）
 
 2. **保存配置**后，查看 MoviePilot 日志（设置 → 系统 → 实时日志）
 
-3. 日志中会自动输出授权链接，类似：
+3. 日志中会输出授权链接，类似：
+   ```log
+   ================================================================================
+   请访问以下链接进行授权（配置了域名，将自动完成授权）:
+   https://trakt.tv/oauth/authorize?response_type=code&client_id=YOUR_CLIENT_ID&redirect_uri=https://moviepilot.example.com/api/v1/plugin/traktsync/auth
+   授权后会自动跳转完成，无需手动操作
+   ================================================================================
+   ```
+
+4. 复制链接在浏览器中访问，登录并授权
+
+5. 授权成功后会自动完成，显示成功页面
+
+6. 插件会收到授权并自动保存Token，无需任何手动操作
+
+> [!TIP]
+> 这是最简单便捷的方法，一键完成授权，无需复制粘贴任何代码！
+
+#### 方法二：手动授权（传统方式）
+
+**适用场景**：
+- 未配置MoviePilot访问域名
+- 内网环境，无法从外网访问
+
+**步骤**：
+
+1. 在插件配置中填写 **Client ID** 和 **Client Secret**
+
+2. **保存配置**后，查看 MoviePilot 日志
+
+3. 日志中会输出授权链接：
    ```log
    ================================================================================
    请访问以下链接进行授权:
    https://trakt.tv/oauth/authorize?response_type=code&client_id=YOUR_CLIENT_ID&redirect_uri=urn:ietf:wg:oauth:2.0:oob
-   授权后，将获得的授权码填入配置页面的【授权码】字段，然后保存配置
+   授权后，将获得的授权码填入配置页面的【授权码】字段，或使用 /trakt_code 命令提交
    ================================================================================
    ```
 
-4. 复制日志中的授权链接，在浏览器中访问
+4. 复制链接在浏览器中访问，登录并授权
 
-5. 授权后会显示一个 **Authorization Code**（类似：`abc123def456...`），复制这个代码
+5. 授权后会显示一个 **Authorization Code**（类似：`abc123def456...`）
 
-6. 返回插件配置页面，将授权码填入 **【授权码】** 字段
+6. 提交授权码（任选一种方式）：
+   - **方式A**：复制授权码，填入插件配置页面的 **【授权码】** 字段，保存
+   - **方式B**：使用远程命令 `/trakt_code 授权码`（推荐，更快捷）
 
-7. **保存配置**，插件会自动获取并保存 Refresh Token
-
-8. 日志中会显示 `Token获取成功！`，此时授权完成
-
-> [!TIP]
-> 这是最简单的方法，插件会自动处理 Token 获取流程，无需手动执行命令或脚本。
+7. 日志中会显示 `Token获取成功！`，授权完成
 
 #### 方法二：使用浏览器手动获取
 
@@ -194,8 +240,9 @@ python get_trakt_token.py
 | **使用代理** | 是否使用系统代理访问 Trakt API | 否 |
 | **Client ID** | 第一步获取的 Client ID | 是 |
 | **Client Secret** | 第一步获取的 Client Secret | 是 |
-| **授权码** | 授权后获取的 Authorization Code，填写后自动获取 Token | 否 |
+| **授权码** | 授权后获取的 Authorization Code，填写后自动获取 Token（手动授权方式） | 否 |
 | **Refresh Token** | 通过授权码自动获取，或手动填写 | 是 |
+| **MoviePilot访问域名** | 填写后可实现自动授权，免去手动填写授权码的步骤（如：`https://moviepilot.example.com`） | 否 |
 
 5. 点击 **保存**
 
@@ -258,18 +305,33 @@ python get_trakt_token.py
 /trakt_download
 ```
 
-### `/trakt_custom_lists`
+### `/trakt_code <授权码>`
 
-**功能**: 仅同步自定义列表
+**功能**: 提交Trakt授权码以更新Token
 
 **行为**:
-- 仅同步配置的自定义列表，不同步 Watchlist
-- 根据"添加启用的订阅"配置决定订阅状态
+- 接收授权码并自动获取Token
+- 更新并保存Access Token和Refresh Token
+- 发送授权结果通知
+
+**使用场景**:
+- Token失效时快速更新授权
+- 手动授权模式（未配置域名）
+- 收到Token失效通知后重新授权
 
 **示例**:
 ```
-/trakt_custom_lists
+/trakt_code abc123def456ghi789
 ```
+
+**使用流程**:
+1. Token失效时会收到通知，包含授权链接
+2. 访问链接并授权，获取授权码
+3. 使用 `/trakt_code 授权码` 提交
+4. 系统自动完成Token更新
+
+> [!TIP]
+> 相比在配置页面填写授权码，使用命令方式更快捷，无需打开网页！
 
 ---
 
@@ -421,12 +483,67 @@ username/list1,username/list2,https://trakt.tv/users/username/lists/list3
 <details>
 <summary><b>Q: Token 过期怎么办？</b></summary>
 
-**A**: 插件会自动刷新 Access Token。Refresh Token 通常有效期为 90 天，过期后需要重新获取。
+**A**: 插件会自动刷新 Access Token。Token失效时会收到通知。
 
-**刷新步骤**:
-1. 访问 Trakt 授权页面重新获取授权码
-2. 使用授权码获取新的 Refresh Token
-3. 在插件配置中更新 Refresh Token
+**方式一：自动授权（推荐，如果配置了域名）**
+1. 收到Token失效通知
+2. 点击通知中的授权链接
+3. 授权后自动完成，无需任何操作
+
+**方式二：使用命令更新（快捷）**
+1. 收到Token失效通知，包含授权链接
+2. 访问链接并授权，复制授权码
+3. 使用命令：`/trakt_code 授权码`
+
+**方式三：配置页面更新（传统）**
+1. 访问授权链接获取授权码
+2. 在插件配置页面填入授权码
+3. 保存配置自动更新Token
+</details>
+
+<details>
+<summary><b>Q: 自动授权和手动授权有什么区别？</b></summary>
+
+**A**: 两种授权方式的区别在于是否需要手动复制粘贴授权码。
+
+| 授权方式 | 需要域名 | 操作步骤 | 推荐度 |
+|---------|---------|---------|--------|
+| **自动授权** | 是 | 点击链接 → 授权 → 完成 | ⭐⭐⭐⭐⭐ |
+| **手动授权** | 否 | 点击链接 → 授权 → 复制码 → 提交 | ⭐⭐⭐ |
+
+**自动授权优势**:
+- 一键完成，无需复制粘贴
+- Token失效时重新授权更快捷
+- 更好的用户体验
+
+**手动授权适用**:
+- 内网环境，无公网域名
+- 不想暴露MoviePilot地址
+- 临时测试使用
+</details>
+
+<details>
+<summary><b>Q: 如何配置自动授权？</b></summary>
+
+**A**: 配置自动授权需要3个步骤：
+
+1. **配置MoviePilot访问域名**
+   - 在插件Trakt配置中填写：`https://moviepilot.example.com`
+   - 必须是可从外网访问的域名
+
+2. **配置Trakt应用Redirect URI**
+   - 访问 [Trakt应用设置](https://trakt.tv/oauth/applications)
+   - Redirect URI填写：`https://moviepilot.example.com/api/v1/plugin/traktsync/auth`
+   - 保存应用设置
+
+3. **完成授权**
+   - 保存插件配置，查看日志中的授权链接
+   - 访问链接授权，自动完成
+
+**注意事项**:
+- 域名必须与Trakt应用配置完全一致
+- 支持HTTP和HTTPS
+- 内网IP地址不能使用自动授权
 </details>
 
 <details>
@@ -721,13 +838,22 @@ traktsync/
 
 ## 📖 更新日志
 
+### v0.5.0 (2026-02-16)
+
+- ✅ **删除远程命令**：移除 `/trakt_custom_lists` 命令（功能已合并到 `/trakt_sync`）
+- ✅ **新增远程命令**：`/trakt_code` 快速提交授权码更新Token
+- ✅ **新增API端点**：`/auth` 接收Trakt OAuth授权回调
+- ✅ **自动授权支持**：配置域名后实现一键授权，无需手动操作
+- ✅ **Token失效通知优化**：提示用户使用 `/trakt_code` 命令或访问授权链接
+- ✅ **配置项新增**：MoviePilot访问域名配置
+- ✅ **授权流程优化**：支持自动授权和手动授权两种方式
+
 ### v0.4.0 (2024-02-16)
 
 - ✅ 新增工作流动作：同步Trakt自定义列表
 - ✅ 支持同步 Trakt 自定义列表（Custom Lists）
 - ✅ 自定义列表与 Watchlist 统一同步
 - ✅ 详情页区分显示来源（Watchlist 或列表名称）
-- ✅ 新增远程命令：`/trakt_custom_lists`
 - ✅ 新增 API 端点：同步自定义列表
 - ✅ 代码优化：合并重复方法，减少约200行代码
 - ✅ 新增代理开关：可选择是否使用系统代理

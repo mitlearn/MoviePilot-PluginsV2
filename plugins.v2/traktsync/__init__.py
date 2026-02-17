@@ -24,7 +24,7 @@ class TraktSync(_PluginBase):
     plugin_name = "Trakt想看"
     plugin_desc = "同步Trakt想看数据，自动添加订阅。"
     plugin_icon = "Trakt_A.png"
-    plugin_version = "0.4.0"
+    plugin_version = "0.5.0"
     plugin_author = "Claude"
     author_url = "https://github.com/"
     plugin_config_prefix = "traktsync_"
@@ -59,6 +59,7 @@ class TraktSync(_PluginBase):
     _tabs: str = "sync_tab"  # 当前标签页
     _custom_lists: str = ""  # 自定义列表（格式：username/list_id，多个用逗号分隔）
     _use_proxy: bool = False  # 使用系统代理访问Trakt API
+    _moviepilot_url: str = ""  # MoviePilot访问域名（用于自动授权回调）
 
     def init_plugin(self, config: dict = None):
         """初始化插件配置"""
@@ -86,6 +87,7 @@ class TraktSync(_PluginBase):
             self._tabs = config.get("_tabs", "sync_tab")
             self._custom_lists = config.get("custom_lists", "")
             self._use_proxy = config.get("use_proxy", False)
+            self._moviepilot_url = config.get("moviepilot_url", "")
 
             # 解析 token 过期时间
             token_expires_str = config.get("token_expires_at")
@@ -98,12 +100,25 @@ class TraktSync(_PluginBase):
 
             # 如果填写了client_id和client_secret，但没有refresh_token，生成授权链接
             if self._client_id and self._client_secret and not self._refresh_token:
-                auth_url = f"https://trakt.tv/oauth/authorize?response_type=code&client_id={self._client_id}&redirect_uri=urn:ietf:wg:oauth:2.0:oob"
-                logger.info("=" * 80)
-                logger.info("请访问以下链接进行授权:")
-                logger.info(auth_url)
-                logger.info("授权后，将获得的授权码填入配置页面的【授权码】字段，然后保存配置")
-                logger.info("=" * 80)
+                # 根据是否配置了域名选择redirect_uri
+                if self._moviepilot_url:
+                    # 确保URL以/结尾
+                    base_url = self._moviepilot_url.rstrip('/')
+                    redirect_uri = f"{base_url}/api/v1/plugin/traktsync/auth"
+                    auth_url = f"https://trakt.tv/oauth/authorize?response_type=code&client_id={self._client_id}&redirect_uri={redirect_uri}"
+                    logger.info("=" * 80)
+                    logger.info("请访问以下链接进行授权（配置了域名，将自动完成授权）:")
+                    logger.info(auth_url)
+                    logger.info("授权后会自动跳转完成，无需手动操作")
+                    logger.info("=" * 80)
+                else:
+                    redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+                    auth_url = f"https://trakt.tv/oauth/authorize?response_type=code&client_id={self._client_id}&redirect_uri={redirect_uri}"
+                    logger.info("=" * 80)
+                    logger.info("请访问以下链接进行授权:")
+                    logger.info(auth_url)
+                    logger.info("授权后，将获得的授权码填入配置页面的【授权码】字段，或使用 /trakt_code 命令提交")
+                    logger.info("=" * 80)
 
             # 如果填写了授权码，尝试获取token
             if self._auth_code and not self._refresh_token:
@@ -158,6 +173,7 @@ class TraktSync(_PluginBase):
             "_tabs": self._tabs,
             "custom_lists": self._custom_lists,
             "use_proxy": self._use_proxy,
+            "moviepilot_url": self._moviepilot_url,
         }
         if self._token_expires_at:
             config["token_expires_at"] = self._token_expires_at.isoformat()
@@ -454,17 +470,39 @@ class TraktSync(_PluginBase):
                                                 'component': 'VCol',
                                                 'props': {'cols': 12},
                                                 'content': [{
+                                                    'component': 'VTextField',
+                                                    'props': {
+                                                        'model': 'moviepilot_url',
+                                                        'label': 'MoviePilot访问域名（可选）',
+                                                        'placeholder': 'https://your-domain.com',
+                                                        'hint': '填写后可实现自动授权，免去手动填写授权码的步骤',
+                                                        'persistent-hint': True
+                                                    }
+                                                }]
+                                            },
+                                        ]
+                                    },
+                                    {
+                                        'component': 'VRow',
+                                        'content': [
+                                            {
+                                                'component': 'VCol',
+                                                'props': {'cols': 12},
+                                                'content': [{
                                                     'component': 'VAlert',
                                                     'props': {
                                                         'type': 'info',
                                                         'variant': 'tonal',
                                                         'text': 'Trakt配置说明：\n'
                                                                '1. 前往 https://trakt.tv/oauth/applications/new 创建应用\n'
-                                                               '   • Redirect URI 必须填写：urn:ietf:wg:oauth:2.0:oob\n'
+                                                               '   • 如果填写了MoviePilot访问域名：Redirect URI填写 http(s)://your-domain.com/api/v1/plugin/traktsync/auth\n'
+                                                               '   • 如果未填写域名：Redirect URI填写 urn:ietf:wg:oauth:2.0:oob\n'
                                                                '2. 填写 Client ID 和 Client Secret 后保存，日志中会输出授权链接\n'
-                                                               '3. 访问授权链接，授权后将获得授权码\n'
-                                                               '4. 将授权码填入【授权码】字段并保存，插件将自动获取 Token\n'
-                                                               '5. Token 有效期 90 天，过期前会自动刷新（每 72 小时检查一次）'
+                                                               '3. 访问授权链接进行授权\n'
+                                                               '   • 如果配置了域名：授权后会自动完成，无需手动操作\n'
+                                                               '   • 如果未配置域名：复制授权码填入【授权码】字段或使用 /trakt_code 命令提交\n'
+                                                               '4. Token 有效期 90 天，过期前会自动刷新（每 72 小时检查一次）\n'
+                                                               '5. Token失效时会收到通知，使用 /trakt_code 命令提交新授权码'
                                                     }
                                                 }]
                                             }
@@ -489,6 +527,7 @@ class TraktSync(_PluginBase):
             "auth_code": "",
             "refresh_token": "",
             "custom_lists": "",
+            "moviepilot_url": "",
             "_tabs": "sync_tab"
         }
 
@@ -993,12 +1032,12 @@ class TraktSync(_PluginBase):
                 }
             },
             {
-                "cmd": "/trakt_custom_lists",
+                "cmd": "/trakt_code",
                 "event": EventType.PluginAction,
-                "desc": "同步Trakt自定义列表",
+                "desc": "提交Trakt授权码",
                 "category": "订阅",
                 "data": {
-                    "action": "trakt_custom_lists"
+                    "action": "trakt_code"
                 }
             }
         ]
@@ -1012,23 +1051,44 @@ class TraktSync(_PluginBase):
                 return
 
             action = event_data.get("action")
-            if action not in ["trakt_sync", "trakt_download", "trakt_custom_lists"]:
+            if action not in ["trakt_sync", "trakt_download", "trakt_code"]:
                 return
 
-            # 自定义列表同步
-            if action == "trakt_custom_lists":
-                logger.info(f"收到命令，开始执行Trakt自定义列表同步 ...")
+            # 提交授权码
+            if action == "trakt_code":
+                args = event_data.get("args")
+                if not args:
+                    self.post_message(
+                        channel=event_data.get("channel"),
+                        title="请提供授权码",
+                        text="使用方式: /trakt_code 授权码",
+                        userid=event_data.get("user")
+                    )
+                    return
+
+                logger.info(f"收到授权码，开始获取Token ...")
                 self.post_message(
                     channel=event_data.get("channel"),
-                    title="开始同步Trakt自定义列表 ...",
+                    title="正在处理授权码 ...",
                     userid=event_data.get("user")
                 )
-                self.sync_custom_lists()
-                self.post_message(
-                    channel=event.event_data.get("channel"),
-                    title="同步Trakt自定义列表完成！",
-                    userid=event.event_data.get("user")
-                )
+
+                # 保存授权码并获取token
+                self._auth_code = args.strip()
+                if self.__get_token_from_code():
+                    self.post_message(
+                        channel=event.event_data.get("channel"),
+                        title="授权成功",
+                        text=f"Token已更新，有效期至 {self._token_expires_at.strftime('%Y-%m-%d %H:%M:%S')}",
+                        userid=event.event_data.get("user")
+                    )
+                else:
+                    self.post_message(
+                        channel=event.event_data.get("channel"),
+                        title="授权失败",
+                        text="获取Token失败，请检查授权码是否正确",
+                        userid=event.event_data.get("user")
+                    )
                 return
 
             # 同步并下载（强制启用订阅）
@@ -1091,6 +1151,12 @@ class TraktSync(_PluginBase):
                 "endpoint": self.delete_history,
                 "methods": ["GET"],
                 "summary": "删除Trakt同步历史记录"
+            },
+            {
+                "path": "/auth",
+                "endpoint": self.api_auth,
+                "methods": ["GET"],
+                "summary": "Trakt OAuth授权回调"
             }
         ]
 
@@ -1416,6 +1482,13 @@ class TraktSync(_PluginBase):
             return False
 
         try:
+            # 根据是否配置了域名选择redirect_uri
+            if self._moviepilot_url:
+                base_url = self._moviepilot_url.rstrip('/')
+                redirect_uri = f"{base_url}/api/v1/plugin/traktsync/auth"
+            else:
+                redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+
             # 发起 token 请求
             response = RequestUtils(
                 headers={"Content-Type": "application/json"},
@@ -1426,7 +1499,7 @@ class TraktSync(_PluginBase):
                     "code": self._auth_code,
                     "client_id": self._client_id,
                     "client_secret": self._client_secret,
-                    "redirect_uri": "urn:ietf:wg:oauth:2.0:oob",
+                    "redirect_uri": redirect_uri,
                     "grant_type": "authorization_code"
                 }
             )
@@ -1490,11 +1563,27 @@ class TraktSync(_PluginBase):
 
                 # 发送通知
                 if self._notify:
-                    self.post_message(
-                        mtype=NotificationType.SiteMessage,
-                        title="Trakt Token刷新失败",
-                        text=f"刷新失败，请检查配置\n错误：{error_msg}"
-                    )
+                    # 根据是否配置了域名选择redirect_uri和提示信息
+                    if self._moviepilot_url:
+                        base_url = self._moviepilot_url.rstrip('/')
+                        redirect_uri = f"{base_url}/api/v1/plugin/traktsync/auth"
+                        auth_url = f"https://trakt.tv/oauth/authorize?response_type=code&client_id={self._client_id}&redirect_uri={redirect_uri}"
+                        self.post_message(
+                            mtype=NotificationType.SiteMessage,
+                            title="Trakt Token失效",
+                            text=f"Token已失效，需要重新授权\n"
+                                 f"点击链接进行授权（会自动完成）:\n{auth_url}"
+                        )
+                    else:
+                        redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+                        auth_url = f"https://trakt.tv/oauth/authorize?response_type=code&client_id={self._client_id}&redirect_uri={redirect_uri}"
+                        self.post_message(
+                            mtype=NotificationType.SiteMessage,
+                            title="Trakt Token失效",
+                            text=f"Token已失效，需要重新授权\n"
+                                 f"1. 访问授权链接获取授权码:\n{auth_url}\n"
+                                 f"2. 使用命令提交授权码:\n/trakt_code 授权码"
+                        )
                 return False
 
             token_data = response.json()
@@ -1521,11 +1610,27 @@ class TraktSync(_PluginBase):
 
             # 发送通知
             if self._notify:
-                self.post_message(
-                    mtype=NotificationType.SiteMessage,
-                    title="Trakt Token刷新异常",
-                    text=f"刷新过程中发生异常\n错误：{error_msg}"
-                )
+                # 根据是否配置了域名选择redirect_uri和提示信息
+                if self._moviepilot_url:
+                    base_url = self._moviepilot_url.rstrip('/')
+                    redirect_uri = f"{base_url}/api/v1/plugin/traktsync/auth"
+                    auth_url = f"https://trakt.tv/oauth/authorize?response_type=code&client_id={self._client_id}&redirect_uri={redirect_uri}"
+                    self.post_message(
+                        mtype=NotificationType.SiteMessage,
+                        title="Trakt Token失效",
+                        text=f"Token刷新失败，需要重新授权\n"
+                             f"点击链接进行授权（会自动完成）:\n{auth_url}"
+                    )
+                else:
+                    redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+                    auth_url = f"https://trakt.tv/oauth/authorize?response_type=code&client_id={self._client_id}&redirect_uri={redirect_uri}"
+                    self.post_message(
+                        mtype=NotificationType.SiteMessage,
+                        title="Trakt Token失效",
+                        text=f"Token刷新失败，需要重新授权\n"
+                             f"1. 访问授权链接获取授权码:\n{auth_url}\n"
+                             f"2. 使用命令提交授权码:\n/trakt_code 授权码"
+                    )
             return False
 
     def __make_trakt_api_call(self, url: str, desc: str) -> Optional[List[dict]]:
@@ -1793,6 +1898,108 @@ class TraktSync(_PluginBase):
     def api_sync_custom_lists(self, apikey: str):
         """API端点：触发自定义列表同步"""
         return self.__api_wrapper(apikey, "Trakt自定义列表同步", self.sync_custom_lists)
+
+    def api_auth(self, code: str = None):
+        """
+        API端点：接收Trakt OAuth授权回调
+        :param code: Trakt返回的授权码
+        :return: HTML响应
+        """
+        from starlette.responses import HTMLResponse
+
+        if not code:
+            error_html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Trakt授权失败</title>
+                <style>
+                    body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+                    .error { color: #d32f2f; }
+                </style>
+            </head>
+            <body>
+                <h1 class="error">授权失败</h1>
+                <p>未收到授权码，请重试</p>
+            </body>
+            </html>
+            """
+            return HTMLResponse(content=error_html, status_code=400)
+
+        try:
+            logger.info(f"收到Trakt授权回调，授权码: {code[:10]}...")
+
+            # 保存授权码并获取token
+            self._auth_code = code
+            if self.__get_token_from_code():
+                # 发送成功通知
+                if self._notify:
+                    self.post_message(
+                        mtype=NotificationType.SiteMessage,
+                        title="Trakt授权成功",
+                        text=f"授权成功！Token已更新，有效期至 {self._token_expires_at.strftime('%Y-%m-%d %H:%M:%S')}"
+                    )
+
+                success_html = """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>Trakt授权成功</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+                        .success { color: #388e3c; }
+                    </style>
+                </head>
+                <body>
+                    <h1 class="success">✓ 授权成功</h1>
+                    <p>Trakt授权已完成，您可以关闭此页面</p>
+                    <p>Token有效期至: """ + self._token_expires_at.strftime('%Y-%m-%d %H:%M:%S') + """</p>
+                </body>
+                </html>
+                """
+                return HTMLResponse(content=success_html, status_code=200)
+            else:
+                error_html = """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>Trakt授权失败</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+                        .error { color: #d32f2f; }
+                    </style>
+                </head>
+                <body>
+                    <h1 class="error">授权失败</h1>
+                    <p>获取Token失败，请检查配置或重试</p>
+                </body>
+                </html>
+                """
+                return HTMLResponse(content=error_html, status_code=500)
+
+        except Exception as e:
+            logger.error(f"处理Trakt授权回调异常: {str(e)}")
+            error_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Trakt授权失败</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                    .error {{ color: #d32f2f; }}
+                </style>
+            </head>
+            <body>
+                <h1 class="error">授权失败</h1>
+                <p>处理授权时发生异常: {str(e)}</p>
+            </body>
+            </html>
+            """
+            return HTMLResponse(content=error_html, status_code=500)
 
     def __action_wrapper(self, action_content, func_name: str, func_callable, *args, **kwargs):
         """
