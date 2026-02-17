@@ -229,7 +229,7 @@ python get_trakt_token.py
 | 配置项 | 说明 | 必填 |
 |--------|------|------|
 | **同步周期** | Cron 表达式，留空则默认每天 8:00 执行 | 否 |
-| **Watchlist同步类型** | 选择同步电影、剧集或全部（⚠️ 仅对 Watchlist 生效） | 否 |
+| **Watchlist同步类型** | 选择同步类型：全部、仅电影、仅剧集（整剧+单季）、仅整剧、仅单季（⚠️ 仅对 Watchlist 生效） | 否 |
 | **添加启用的订阅** | 开启后添加的订阅为激活状态(N)，MoviePilot会自动搜索下载；关闭后为暂停状态(S)，不会触发搜索 | 否 |
 | **自定义列表** | Trakt自定义列表，格式：username/list_id 或 URL，多个用逗号分隔（⚠️ 全同步，不受Watchlist同步类型限制） | 否 |
 
@@ -287,24 +287,6 @@ python get_trakt_token.py
 /trakt_sync
 ```
 
-### `/trakt_download`
-
-**功能**: 同步并下载 Trakt想看列表（强制启用订阅）
-
-**行为**:
-- 同步 Watchlist 和自定义列表
-- **强制添加启用的订阅（state=N），无视"添加启用的订阅"配置**
-- 所有新增订阅都会立即触发搜索下载
-
-**使用场景**:
-- 临时想要立即下载某些媒体，无论配置如何设置
-- 即使"添加启用的订阅"关闭，也能强制启用订阅
-
-**示例**:
-```
-/trakt_download
-```
-
 ### `/trakt_code <授权码>`
 
 **功能**: 提交Trakt授权码以更新Token
@@ -344,7 +326,6 @@ python get_trakt_token.py
 | 动作名称 | 功能 | 说明 |
 |---------|------|------|
 | **同步Trakt想看** | 同步 Watchlist 和自定义列表 | 根据"添加启用的订阅"配置决定订阅状态 |
-| **同步并下载Trakt想看** | 同步 Watchlist 和自定义列表 | **强制启用订阅（无视配置），立即触发搜索下载** |
 | **同步Trakt自定义列表** | 仅同步自定义列表 | 根据"添加启用的订阅"配置决定订阅状态 |
 
 ### 使用示例
@@ -367,19 +348,11 @@ curl -X POST "http://your-moviepilot/api/v1/plugin/TraktSync/sync" \
   -H "Content-Type: application/json" \
   -d '{"apikey": "your_api_key"}'
 
-# 同步并下载（强制启用订阅，无视配置）
-curl -X POST "http://your-moviepilot/api/v1/plugin/TraktSync/sync_download" \
-  -H "Content-Type: application/json" \
-  -d '{"apikey": "your_api_key"}'
-
 # 同步自定义列表（根据配置决定订阅状态）
 curl -X POST "http://your-moviepilot/api/v1/plugin/TraktSync/sync_custom_lists" \
   -H "Content-Type: application/json" \
   -d '{"apikey": "your_api_key"}'
 ```
-
-> [!NOTE]
-> `/sync_download` 端点会强制添加启用的订阅（state=N），无论"添加启用的订阅"配置如何设置。
 
 详细的 API 文档请参考 [API_Document.md](API_Document.md)。
 
@@ -442,7 +415,8 @@ username/list1,username/list2,https://trakt.tv/users/username/lists/list3
 ```
 1. 同步 Watchlist（受"Watchlist同步类型"配置限制）
    ├─ 同步电影（如果Watchlist同步类型=全部/仅电影）
-   └─ 同步剧集（如果Watchlist同步类型=全部/仅剧集）
+   ├─ 同步整剧（如果Watchlist同步类型=全部/仅剧集/仅整剧）
+   └─ 同步单季（如果Watchlist同步类型=全部/仅剧集/仅单季）
 2. 同步自定义列表（如果配置）
    ├─ 解析列表配置（支持 username/list_id 或 URL）
    ├─ 获取列表内容
@@ -618,7 +592,12 @@ https://trakt.tv/users/myusername/lists/sci-fi-movies
 **A**: 不生效。"Watchlist同步类型"配置仅对 Watchlist 生效。
 
 **说明**：
-- **Watchlist**：受"Watchlist同步类型"控制，可以选择仅同步电影、仅同步剧集或全部同步
+- **Watchlist**：受"Watchlist同步类型"控制，可以选择：
+  - **全部**：同步电影、整剧、单季
+  - **仅电影**：只同步电影
+  - **仅剧集**：同步整剧和单季
+  - **仅整剧**：只同步完整剧集（不含单季）
+  - **仅单季**：只同步单独添加的季度
 - **自定义列表**：始终全同步，会同步列表中的所有电影和剧集，不受"Watchlist同步类型"限制
 
 **使用场景**：
@@ -632,26 +611,6 @@ https://trakt.tv/users/myusername/lists/sci-fi-movies
 **A**: 在插件详情页的同步历史中：
 - Watchlist 的项目类型显示为"电影"或"电视剧"
 - 自定义列表的项目类型显示为列表名称（如 "myusername/sci-fi-movies"）
-</details>
-
-<details>
-<summary><b>Q: `/trakt_sync` 和 `/trakt_download` 有什么区别？</b></summary>
-
-**A**: 两者的主要区别在于订阅状态的处理方式。
-
-| 命令 | 订阅状态 | 说明 |
-|------|---------|------|
-| `/trakt_sync` | 根据配置 | 遵循"添加启用的订阅"配置项的设置 |
-| `/trakt_download` | 强制启用 | 无视配置，强制添加启用的订阅（state=N） |
-
-**使用场景**:
-- **`/trakt_sync`**: 日常使用，按照你的配置偏好添加订阅
-- **`/trakt_download`**: 临时需要立即下载，即使配置中关闭了"添加启用的订阅"
-
-**示例**:
-- 配置中关闭了"添加启用的订阅"（只想添加订阅但不自动搜索）
-- 使用 `/trakt_sync` 会添加暂停状态的订阅（state=S）
-- 使用 `/trakt_download` 会强制添加激活状态的订阅（state=N），立即触发搜索
 </details>
 
 <details>

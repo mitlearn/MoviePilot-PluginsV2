@@ -35,8 +35,8 @@
   },
   "TraktSync": {
     "name": "Trakt想看",
-    "description": "同步Trakt想看列表，自动添加订阅或搜索下载。支持OAuth自动授权。",
-    "labels": "订阅,trakt,同步,OAuth",
+    "description": "同步Trakt想看列表，自动添加订阅或搜索下载。。",
+    "labels": "订阅,trakt",
     "version": "0.5.0",
     "icon": "Trakt_A.png",
     "author": "Claude",
@@ -46,7 +46,7 @@
       "v0.2.0": "新增详情页展示同步历史；修复搜索下载逻辑；支持删除历史记录",
       "v0.3.0": "新增详情页；新增订阅状态控制；搜索下载功能；操作类型优化",
       "v0.4.0": "新增工作流动作：同步Trakt自定义列表",
-      "v0.5.0": "删除/trakt_custom_lists命令；新增/trakt_code命令；新增OAuth授权回调API；支持自动授权；优化Token失效通知"
+      "v0.5.0": "新增OAuth授权回调API；支持自动授权；优化Token失效通知"
     }
   }
 }

@@ -331,6 +331,103 @@ curl -X GET "https://api.trakt.tv/sync/watchlist/shows" \
 
 ---
 
+### 获取想看单季列表
+
+**端点**: `GET /sync/watchlist/seasons`
+
+**请求头**:
+
+```http
+Content-Type: application/json
+trakt-api-version: 2
+trakt-api-key: {CLIENT_ID}
+Authorization: Bearer {ACCESS_TOKEN}
+```
+
+**cURL 示例**:
+
+```bash
+curl -X GET "https://api.trakt.tv/sync/watchlist/seasons" \
+  -H "Content-Type: application/json" \
+  -H "trakt-api-version: 2" \
+  -H "trakt-api-key: YOUR_CLIENT_ID" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+**响应**:
+
+```json
+[
+  {
+    "rank": 1,
+    "id": 34567,
+    "listed_at": "2024-01-20T09:15:00.000Z",
+    "notes": null,
+    "type": "season",
+    "season": {
+      "number": 1,
+      "ids": {
+        "trakt": 123456,
+        "tvdb": 456789,
+        "tmdb": 789012
+      }
+    },
+    "show": {
+      "title": "Breaking Bad",
+      "year": 2008,
+      "ids": {
+        "trakt": 1388,
+        "slug": "breaking-bad",
+        "tvdb": 81189,
+        "imdb": "tt0903747",
+        "tmdb": 1396
+      }
+    }
+  },
+  {
+    "rank": 2,
+    "id": 45678,
+    "listed_at": "2024-02-05T16:45:00.000Z",
+    "notes": null,
+    "type": "season",
+    "season": {
+      "number": 3,
+      "ids": {
+        "trakt": 234567,
+        "tvdb": 567890,
+        "tmdb": 890123
+      }
+    },
+    "show": {
+      "title": "The Wire",
+      "year": 2002,
+      "ids": {
+        "trakt": 1393,
+        "slug": "the-wire",
+        "tvdb": 79126,
+        "imdb": "tt0306414",
+        "tmdb": 1438
+      }
+    }
+  }
+]
+```
+
+**字段说明**:
+- `rank`: 在列表中的排序
+- `id`: Watchlist 条目 ID
+- `listed_at`: 添加到 Watchlist 的时间
+- `type`: 类型（固定为 "season"）
+- `season.number`: 季号
+- `season.ids.trakt`: 季的 Trakt ID
+- `season.ids.tvdb`: 季的 TVDB ID
+- `season.ids.tmdb`: 季的 TMDB ID
+- `show.title`: 剧集标题
+- `show.year`: 首播年份
+- `show.ids.*`: 剧集的各种 ID
+
+---
+
 ## 错误处理
 
 ### 常见错误码
@@ -503,38 +600,6 @@ curl -X POST "http://localhost:3000/api/v1/plugin/TraktSync/sync?apikey=YOUR_API
 **说明**:
 - 触发Trakt想看列表同步
 - 仅添加订阅，不搜索下载
-- 异步执行，立即返回
-
----
-
-### 触发同步并下载
-
-**端点**: `POST /api/v1/plugin/TraktSync/sync_download`
-
-**请求参数**:
-
-| 参数名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| apikey | string | 是 | MoviePilot API Token |
-
-**cURL 示例**:
-
-```bash
-curl -X POST "http://localhost:3000/api/v1/plugin/TraktSync/sync_download?apikey=YOUR_API_TOKEN"
-```
-
-**成功响应**:
-
-```json
-{
-  "success": true,
-  "message": "同步下载任务已启动"
-}
-```
-
-**说明**:
-- 触发Trakt想看列表同步
-- 优先搜索下载，失败时添加订阅
 - 异步执行，立即返回
 
 ---
@@ -738,36 +803,6 @@ TraktSync 插件支持以下远程命令，可通过 MoviePilot 的消息通知�
 
 ---
 
-### 同步并下载 Trakt 想看
-
-**命令**: `/trakt_download`
-
-**分类**: 订阅
-
-**描述**: 同步 Trakt 想看列表，优先搜索下载，失败时添加订阅
-
-**执行流程**:
-1. 获取 Trakt 想看电影和剧集列表
-2. 检查媒体库是否已存在
-3. 检查是否已订阅
-4. 未存在的内容：
-   - 搜索资源
-   - 找到资源 → 立即下载
-   - 未找到资源或下载失败 → 添加订阅
-5. 记录同步历史
-
-**使用场景**:
-- 希望立即获取资源
-- 资源丰富的站点环境
-- 需要快速完成观看需求
-
-**注意**:
-- 强制启用搜索下载功能，无论插件配置中是否开启
-- 会消耗站点流量和下载器资源
-- 剧集可能部分下载成功，剩余部分自动添加订阅
-
----
-
 ### 提交 Trakt 授权码
 
 **命令**: `/trakt_code <授权码>`
@@ -843,27 +878,6 @@ TraktSync 插件注册了以下工作流动作，可在 MoviePilot 工作流编�
 
 ---
 
-### 同步并下载Trakt想看
-
-**动作ID**: `trakt_sync_download`
-
-**动作名称**: 同步并下载Trakt想看
-
-**功能**: 同步Trakt想看列表，优先搜索下载
-
-**参数**: 无
-
-**返回**:
-- `成功`: `True, ActionContent`
-- `失败`: `False, ActionContent`
-
-**使用场景**:
-- 立即获取资源的工作流
-- 资源监控触发后的下载动作
-- 与通知、过滤等动作组合
-
----
-
 ### 同步Trakt自定义列表
 
 **动作ID**: `trakt_sync_custom_lists`
@@ -913,13 +927,6 @@ response = requests.post(
 )
 print(response.json())
 
-# 触发同步并下载
-response = requests.post(
-    f"{base_url}/api/v1/plugin/TraktSync/sync_download",
-    params={"apikey": api_token}
-)
-print(response.json())
-
 # 触发自定义列表同步
 response = requests.post(
     f"{base_url}/api/v1/plugin/TraktSync/sync_custom_lists",
@@ -938,9 +945,6 @@ API_TOKEN="YOUR_API_TOKEN"
 
 # 触发同步
 curl -X POST "${BASE_URL}/api/v1/plugin/TraktSync/sync?apikey=${API_TOKEN}"
-
-# 触发同步并下载
-curl -X POST "${BASE_URL}/api/v1/plugin/TraktSync/sync_download?apikey=${API_TOKEN}"
 
 # 触发自定义列表同步
 curl -X POST "${BASE_URL}/api/v1/plugin/TraktSync/sync_custom_lists?apikey=${API_TOKEN}"
