@@ -343,13 +343,8 @@ python get_trakt_token.py
 插件还提供了 HTTP API 端点，可以通过 POST 请求触发：
 
 ```bash
-# 同步 Watchlist（根据配置决定订阅状态）
+# 同步 Watchlist 和自定义列表（根据配置决定订阅状态）
 curl -X POST "http://your-moviepilot/api/v1/plugin/TraktSync/sync" \
-  -H "Content-Type: application/json" \
-  -d '{"apikey": "your_api_key"}'
-
-# 同步自定义列表（根据配置决定订阅状态）
-curl -X POST "http://your-moviepilot/api/v1/plugin/TraktSync/sync_custom_lists" \
   -H "Content-Type: application/json" \
   -d '{"apikey": "your_api_key"}'
 ```
@@ -752,7 +747,6 @@ traktsync/
 |------|------|
 | `init_plugin(config)` | 初始化插件配置 |
 | `sync()` | 核心同步逻辑（Watchlist + 自定义列表） |
-| `sync_custom_lists()` | 仅同步自定义列表 |
 | `__refresh_access_token()` | 刷新 Access Token |
 | `__make_trakt_api_call()` | 统一的 Trakt API 调用方法 |
 | `__get_watchlist_movies()` | 获取电影 Watchlist |
@@ -800,6 +794,11 @@ traktsync/
 ### v0.5.0 (2026-02-16)
 
 - ✅ **删除远程命令**：移除 `/trakt_custom_lists` 命令（功能已合并到 `/trakt_sync`）
+- ✅ **代码重构**：删除未使用的 `force_enable` 参数，简化代码结构
+- ✅ **删除重复代码**：移除 `sync_custom_lists()` 方法（与 `sync()` 中逻辑重复）
+- ✅ **删除冗余 API**：移除 `/sync_custom_lists` API 端点和 `trakt_sync_custom_lists` 工作流动作
+- ✅ **增强调试日志**：添加配置加载、同步开始、订阅添加的详细日志
+- ✅ **代码优化**：减少约 126 行代码（5.9%），提升可维护性
 - ✅ **新增远程命令**：`/trakt_code` 快速提交授权码更新Token
 - ✅ **新增API端点**：`/auth` 接收Trakt OAuth授权回调
 - ✅ **自动授权支持**：配置域名后实现一键授权，无需手动操作

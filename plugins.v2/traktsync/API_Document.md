@@ -605,37 +605,6 @@ curl -X POST "http://localhost:3000/api/v1/plugin/TraktSync/sync?apikey=YOUR_API
 ---
 
 ### 触发自定义列表同步
-
-**端点**: `POST /api/v1/plugin/TraktSync/sync_custom_lists`
-
-**请求参数**:
-
-| 参数名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| apikey | string | 是 | MoviePilot API Token |
-
-**cURL 示例**:
-
-```bash
-curl -X POST "http://localhost:3000/api/v1/plugin/TraktSync/sync_custom_lists?apikey=YOUR_API_TOKEN"
-```
-
-**成功响应**:
-
-```json
-{
-  "success": true,
-  "message": "自定义列表同步任务已启动"
-}
-```
-
-**说明**:
-- 触发配置的Trakt自定义列表同步
-- 同步配置中所有列表的电影和剧集
-- 异步执行，立即返回
-
----
-
 ### 删除历史记录
 
 **端点**: `GET /api/v1/plugin/TraktSync/delete_history`
@@ -878,38 +847,6 @@ TraktSync 插件注册了以下工作流动作，可在 MoviePilot 工作流编�
 
 ---
 
-### 同步Trakt自定义列表
-
-**动作ID**: `trakt_sync_custom_lists`
-
-**动作名称**: 同步Trakt自定义列表
-
-**功能**: 同步配置的Trakt自定义列表
-
-**参数**: 无
-
-**返回**:
-- `成功`: `True, ActionContent`
-- `失败`: `False, ActionContent`
-
-**使用场景**:
-- 定期同步主题列表
-- 批量处理自定义收藏
-- 与条件触发器结合
-
-**配置要求**:
-- 插件配置中需要预先设置自定义列表
-- 列表格式：`username/list_id` 或完整URL
-- 多个列表用逗号分隔
-
-**示例配置**:
-```
-justin/star-wars, https://trakt.tv/users/jasonbourne/lists/action-movies
-```
-
----
-
-## 集成示例
 
 ### Python 脚本调用
 
@@ -920,16 +857,9 @@ import requests
 base_url = "http://localhost:3000"
 api_token = "YOUR_API_TOKEN"
 
-# 触发同步
+# 触发同步（Watchlist + 自定义列表）
 response = requests.post(
     f"{base_url}/api/v1/plugin/TraktSync/sync",
-    params={"apikey": api_token}
-)
-print(response.json())
-
-# 触发自定义列表同步
-response = requests.post(
-    f"{base_url}/api/v1/plugin/TraktSync/sync_custom_lists",
     params={"apikey": api_token}
 )
 print(response.json())
@@ -943,11 +873,8 @@ print(response.json())
 BASE_URL="http://localhost:3000"
 API_TOKEN="YOUR_API_TOKEN"
 
-# 触发同步
+# 触发同步（Watchlist + 自定义列表）
 curl -X POST "${BASE_URL}/api/v1/plugin/TraktSync/sync?apikey=${API_TOKEN}"
-
-# 触发自定义列表同步
-curl -X POST "${BASE_URL}/api/v1/plugin/TraktSync/sync_custom_lists?apikey=${API_TOKEN}"
 ```
 
 ### 工作流配置示例
@@ -964,15 +891,6 @@ workflow:
       action: "trakt_sync"
 
 # 示例2：每周日晚上8点同步自定义列表
-workflow:
-  name: "每周Trakt列表同步"
-  trigger:
-    type: "cron"
-    cron: "0 20 * * 0"
-  actions:
-    - plugin: "TraktSync"
-      action: "trakt_sync_custom_lists"
-```
 
 ---
 
@@ -984,4 +902,5 @@ workflow:
 | 1.1 | 2026-02-15 | 新增插件API端点文档；新增远程命令说明 |
 | 1.2 | 2026-02-15 | 新增同步API端点；新增工作流动作注册；新增集成示例 |
 | 1.3 | 2026-02-15 | 新增Trakt自定义列表API；新增自定义列表同步功能；新增工作流动作和远程命令 |
-| 1.4 | 2026-02-16 | 删除 `/trakt_custom_lists` 远程命令；新增 `/trakt_code` 命令；新增OAuth授权回调API；新增自动授权流程支持 |
+| 1.4 | 2026-02-16 | 删除 `/trakt_custom_lists` 远程命令；新增 `/trakt_code` 命令；新增 OAuth 授权回调 API；新增自动授权流程支持；代码重构删除 `force_enable` 参数和 `sync_custom_lists` 方法 |
+| 1.5 | 2026-02-17 | 删除 `/sync_custom_lists` API 端点；删除 `trakt_sync_custom_lists` 工作流动作；代码重构删除冗余参数 |
