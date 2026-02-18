@@ -1185,6 +1185,9 @@ class TraktSync(_PluginBase):
         # 统计数据
         stats = self.__init_sync_stats()
 
+        # 收集本次新增的订阅 ID，用于末尾统一修正状态
+        new_subscribe_ids: List[int] = []
+
         # 同步电影（根据 sync_type 判断是否需要同步）
         if self._sync_type in ["all", "movie"]:
             movies = self.__get_watchlist_movies()
@@ -1197,6 +1200,8 @@ class TraktSync(_PluginBase):
                         if result:
                             if result.get("is_new"):
                                 stats["movies_added"] += 1
+                                if result.get("subscribe_id"):
+                                    new_subscribe_ids.append(result["subscribe_id"])
                             else:
                                 stats["movies_exists"] += 1
                             # 添加到历史记录
@@ -1217,6 +1222,8 @@ class TraktSync(_PluginBase):
                         if result:
                             if result.get("is_new"):
                                 stats["shows_added"] += 1
+                                if result.get("subscribe_id"):
+                                    new_subscribe_ids.append(result["subscribe_id"])
                             else:
                                 stats["shows_exists"] += 1
                             # 添加到历史记录
@@ -1238,6 +1245,8 @@ class TraktSync(_PluginBase):
                         if result:
                             if result.get("is_new"):
                                 stats["shows_added"] += 1
+                                if result.get("subscribe_id"):
+                                    new_subscribe_ids.append(result["subscribe_id"])
                             else:
                                 stats["shows_exists"] += 1
                             # 添加到历史记录
@@ -1287,6 +1296,8 @@ class TraktSync(_PluginBase):
                             if result:
                                 if result.get("is_new"):
                                     stats["movies_added"] += 1
+                                    if result.get("subscribe_id"):
+                                        new_subscribe_ids.append(result["subscribe_id"])
                                 else:
                                     stats["movies_exists"] += 1
                                 history.append(result.get("history"))
@@ -1297,6 +1308,8 @@ class TraktSync(_PluginBase):
                             if result:
                                 if result.get("is_new"):
                                     stats["shows_added"] += 1
+                                    if result.get("subscribe_id"):
+                                        new_subscribe_ids.append(result["subscribe_id"])
                                 else:
                                     stats["shows_exists"] += 1
                                 history.append(result.get("history"))
@@ -1307,6 +1320,10 @@ class TraktSync(_PluginBase):
                     except Exception as e:
                         logger.error(f"同步列表项失败: {str(e)}")
                         stats["errors"] += 1
+
+        # 修正本次新增订阅的状态（等待异步事件处理完毕后统一修正）
+        if new_subscribe_ids:
+            self.__fix_subscribe_states(new_subscribe_ids)
 
         # 更新上次同步时间
         self._last_sync_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1587,7 +1604,8 @@ class TraktSync(_PluginBase):
             is_new = False
         else:
             # 添加订阅
-            is_new = self.__add_subscribe(mediainfo, meta)
+            subscribe_id = self.__add_subscribe(mediainfo, meta)
+            is_new = subscribe_id is not None
             if is_new:
                 action = "subscribe" if self._add_and_enable else "add"
             else:
@@ -1608,6 +1626,7 @@ class TraktSync(_PluginBase):
 
         return {
             "is_new": is_new,
+            "subscribe_id": subscribe_id,
             "history": history_item
         }
 
@@ -1670,7 +1689,8 @@ class TraktSync(_PluginBase):
             is_new = False
         else:
             # 添加订阅
-            is_new = self.__add_subscribe(mediainfo, meta)
+            subscribe_id = self.__add_subscribe(mediainfo, meta)
+            is_new = subscribe_id is not None
             if is_new:
                 action = "subscribe" if self._add_and_enable else "add"
             else:
@@ -1692,6 +1712,7 @@ class TraktSync(_PluginBase):
 
         return {
             "is_new": is_new,
+            "subscribe_id": subscribe_id,
             "history": history_item
         }
 
@@ -1704,14 +1725,14 @@ class TraktSync(_PluginBase):
         """
         return SubscribeOper().exists(tmdbid=tmdb_id, season=season)
 
-    def __add_subscribe(self, mediainfo, meta) -> bool:
+    def __add_subscribe(self, mediainfo, meta) -> Optional[int]:
         """
         添加订阅，根据 add_and_enable 决定初始状态
-        :return: 是否成功添加新订阅
+        :return: 成功返回 subscribe_id，失败返回 None
         """
         try:
             desired_state = 'N' if self._add_and_enable else 'S'
-            logger.debug(f"添加订阅: {mediainfo.title_year}, desired_state={desired_state}")
+            logger.info(f"添加订阅: {mediainfo.title_year}, desired_state={desired_state}")
 
             subscribe_id, msg = SubscribeChain().add(
                 title=mediainfo.title,
@@ -1724,21 +1745,42 @@ class TraktSync(_PluginBase):
                 state=desired_state
             )
             if subscribe_id:
-                # 校验并修正状态，防止 state 在 kwargs 透传中被丢弃
-                subscribe = SubscribeOper().get(subscribe_id)
-                if subscribe and subscribe.state != desired_state:
-                    logger.debug(f"订阅状态不符预期: {mediainfo.title_year}, "
-                                 f"当前={subscribe.state}, 期望={desired_state}，正在修正")
-                    SubscribeOper().update(subscribe_id, {'state': desired_state})
                 status_text = "激活" if desired_state == 'N' else "暂停"
-                logger.info(f"添加订阅成功: {mediainfo.title_year} ({status_text})")
-                return True
+                logger.info(f"添加订阅成功: {mediainfo.title_year} (id={subscribe_id}, {status_text})")
+                return subscribe_id
             else:
                 logger.error(f"添加订阅失败: {mediainfo.title_year} - {msg}")
-                return False
+                return None
         except Exception as e:
             logger.error(f"添加订阅异常: {mediainfo.title_year} - {str(e)}")
-            return False
+            return None
+
+    def __fix_subscribe_states(self, subscribe_ids: List[int]):
+        """
+        批量修正本次新增订阅的状态
+        在 sync() 末尾调用，此时异步事件（如订阅助手的自动暂停）已处理完毕
+        """
+        if not subscribe_ids:
+            return
+
+        desired_state = 'N' if self._add_and_enable else 'S'
+        fixed_count = 0
+
+        for sid in subscribe_ids:
+            try:
+                subscribe = SubscribeOper().get(sid)
+                if subscribe and subscribe.state != desired_state:
+                    SubscribeOper().update(sid, {'state': desired_state})
+                    logger.info(f"订阅状态已修正: {subscribe.name} (id={sid}), "
+                                f"{subscribe.state} -> {desired_state}")
+                    fixed_count += 1
+            except Exception as e:
+                logger.error(f"修正订阅状态异常: id={sid} - {str(e)}")
+
+        if fixed_count:
+            logger.info(f"共修正 {fixed_count} 个订阅的状态为 {'激活' if desired_state == 'N' else '暂停'}")
+        else:
+            logger.debug(f"本次新增的 {len(subscribe_ids)} 个订阅状态均符合预期")
 
     def __send_notification(self, stats: dict):
         """
