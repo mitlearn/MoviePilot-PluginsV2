@@ -343,8 +343,13 @@ python get_trakt_token.py
 插件还提供了 HTTP API 端点，可以通过 POST 请求触发：
 
 ```bash
-# 同步 Watchlist 和自定义列表（根据配置决定订阅状态）
+# 同步 Watchlist（根据配置决定订阅状态）
 curl -X POST "http://your-moviepilot/api/v1/plugin/TraktSync/sync" \
+  -H "Content-Type: application/json" \
+  -d '{"apikey": "your_api_key"}'
+
+# 同步自定义列表（根据配置决定订阅状态）
+curl -X POST "http://your-moviepilot/api/v1/plugin/TraktSync/sync_custom_lists" \
   -H "Content-Type: application/json" \
   -d '{"apikey": "your_api_key"}'
 ```
@@ -390,7 +395,7 @@ username/list1,username/list2,https://trakt.tv/users/username/lists/list3
 ### 同步行为
 
 - 自定义列表会与 Watchlist 一起同步（使用 `/trakt_sync` 或定时任务时）
-- 可以单独同步自定义列表（使用 `/trakt_custom_lists` 命令或工作流动作）
+- 可以单独同步自定义列表（使用工作流动作"同步Trakt自定义列表"或 API 端点）
 - **⚠️ 重要**：自定义列表是全同步（电影+剧集），不受"Watchlist同步类型"配置限制
 - 自定义列表的项目在详情页会显示列表名称，而不是"电影"或"电视剧"
 
@@ -426,15 +431,21 @@ username/list1,username/list2,https://trakt.tv/users/username/lists/list3
 插件会自动检查以下情况，避免重复：
 
 1. **媒体库已存在**: 通过 TMDB ID 检查媒体服务器（Plex/Emby/Jellyfin）
-2. **已在订阅列表**: 检查 MoviePilot 订阅数据库
+2. **已在订阅列表**: 检查 MoviePilot 订阅数据库（包含激活、暂停等所有状态）
 3. **已在同步历史**: 检查本次同步是否已处理过该 TMDB ID
 
 满足以上任一条件，将跳过该媒体。
 
+> [!NOTE]
+> 对于单季剧集，订阅检测会精确到具体季号，不同季可以独立订阅。
+
 ### 订阅状态说明
 
-- **添加启用的订阅=开启**: 添加的订阅状态为 N（激活），MoviePilot 会自动搜索下载
-- **添加启用的订阅=关闭**: 添加的订阅状态为 S（暂停），不会触发自动搜索
+- **添加启用的订阅=开启**: 新添加的订阅状态为 N（激活），MoviePilot 会自动搜索下载
+- **添加启用的订阅=关闭**: 新添加的订阅状态为 S（暂停），不会触发自动搜索
+
+> [!IMPORTANT]
+> 此开关**仅影响本次新添加的订阅**，不会修改已有订阅的状态。若某媒体已有订阅（包括暂停状态），插件会跳过，不做任何修改。
 
 ### 通知内容
 
@@ -530,14 +541,18 @@ username/list1,username/list2,https://trakt.tv/users/username/lists/list3
 
 **A**: 可能原因：
 1. 媒体库已存在该媒体
-2. 已在订阅列表中
-3. TMDB ID 缺失（检查日志）
-4. 媒体识别失败（检查日志）
+2. 已在订阅列表中（包括暂停状态的订阅）
+3. TMDB ID 缺失
+4. 媒体识别失败
 
 **排查步骤**:
-1. 查看插件日志，搜索关键词 "处理电影" 或 "处理剧集"
-2. 检查是否有 "已存在" 或 "已在订阅中" 的提示
-3. 确认 Trakt Watchlist 中的媒体有正确的 TMDB ID
+1. 将 MoviePilot 日志等级调整为 **DEBUG**
+2. 重新触发同步，搜索关键词 "处理电影" 或 "处理单季"
+3. 查看是否有 "已存在" 或 "已在订阅中，跳过" 的提示
+4. 确认 Trakt Watchlist 中的媒体有正确的 TMDB ID
+
+> [!NOTE]
+> 若某媒体在订阅列表中处于暂停（S）状态，插件会将其视为"已订阅"而跳过，不会修改其状态。如需重新激活，请在 MoviePilot 订阅管理页面手动操作。
 </details>
 
 <details>
@@ -575,7 +590,7 @@ https://trakt.tv/users/myusername/lists/sci-fi-movies
 
 1. **定时任务**: 会与 Watchlist 一起自动同步
 2. **`/trakt_sync` 命令**: 会同时同步 Watchlist 和自定义列表
-3. **`/trakt_custom_lists` 命令**: 仅同步自定义列表，不同步 Watchlist
+3. **工作流动作"同步Trakt自定义列表"或 API 端点**: 仅同步自定义列表，不同步 Watchlist
 4. **工作流动作**: 根据选择的动作类型决定
 
 **⚠️ 重要**：自定义列表始终全同步（电影+剧集），不受"Watchlist同步类型"配置影响。
@@ -678,21 +693,22 @@ https://trakt.tv/users/myusername/lists/sci-fi-movies
 [INFO] Access token刷新成功，有效期至 2024-02-20T08:00:00+00:00
 [INFO] 获取到 15 部Trakt想看电影
 [INFO] 获取到 8 部Trakt想看剧集
-[INFO] 处理电影: The Dark Knight (2008) [TMDB: 155]
-[INFO] 添加订阅成功: The Dark Knight (2008)
-[INFO] 处理剧集: Breaking Bad (2008) [TMDB: 1396]
-[INFO] Breaking Bad (2008) 已在订阅中
+[INFO] 添加订阅成功: The Dark Knight (2008) (激活)
 [INFO] Trakt想看同步完成: 新增电影 10 部，新增剧集 3 部，已存在电影 5 部，已存在剧集 5 部，错误 0 个
 ```
 
+> [!TIP]
+> 每个条目的处理细节（已存在、已在订阅中、TMDB ID 等）记录在 **DEBUG** 级别。如需查看完整处理过程，请在 MoviePilot 中将日志等级调整为 DEBUG。
+
 ### 错误排查
 
-| 日志关键词 | 可能原因 | 解决方案 |
-|-----------|---------|---------|
-| `Token刷新失败` | Refresh Token 无效或过期 | 重新获取 Refresh Token |
-| `缺少TMDB ID` | Trakt 数据不完整 | 在 Trakt.tv 上检查该媒体信息 |
-| `无法识别` | TMDB 数据库无该媒体 | 检查 TMDB ID 是否正确 |
-| `429` | API 请求过于频繁 | 降低同步频率 |
+| 日志关键词 | 等级 | 可能原因 | 解决方案 |
+|-----------|------|---------|---------|
+| `Token刷新失败` | ERROR | Refresh Token 无效或过期 | 重新获取 Refresh Token |
+| `无法识别` | WARN | TMDB 数据库无该媒体 | 检查 TMDB ID 是否正确 |
+| `添加订阅失败` | ERROR | 订阅链路异常 | 查看完整 DEBUG 日志 |
+| `429` | ERROR | API 请求过于频繁 | 降低同步频率 |
+| `缺少TMDB ID` | DEBUG | Trakt 数据不完整 | 在 Trakt.tv 上检查该媒体信息 |
 
 ---
 
@@ -747,6 +763,7 @@ traktsync/
 |------|------|
 | `init_plugin(config)` | 初始化插件配置 |
 | `sync()` | 核心同步逻辑（Watchlist + 自定义列表） |
+| `sync_custom_lists()` | 仅同步自定义列表 |
 | `__refresh_access_token()` | 刷新 Access Token |
 | `__make_trakt_api_call()` | 统一的 Trakt API 调用方法 |
 | `__get_watchlist_movies()` | 获取电影 Watchlist |
@@ -791,14 +808,18 @@ traktsync/
 
 ## 📖 更新日志
 
+### v0.5.0 (2026-02-17) - 最新
+
+- 🐛 **修复** `add_and_enable=True` 时订阅仍为暂停状态的问题：改用 `SubscribeOper().exists()` 进行订阅检测，该方法与 `SubscribeChain` 内部使用相同查找逻辑，不受订阅 state 影响
+- 🐛 **修复** 单季订阅检测不精确：`__sync_season()` 现在按具体季号检测，避免已订阅 S1 导致 S2 被错误跳过
+- 🧹 **清理** 移除从未使用的 `force_enable` 参数（存在于 5 个方法中但从未以 `True` 调用）
+- 📝 **优化** 日志等级：逐条处理详情（已存在/已订阅/TMDB缺失）调整为 DEBUG；媒体识别失败降为 WARNING；保留关键操作为 INFO
+
+---
+
 ### v0.5.0 (2026-02-16)
 
 - ✅ **删除远程命令**：移除 `/trakt_custom_lists` 命令（功能已合并到 `/trakt_sync`）
-- ✅ **代码重构**：删除未使用的 `force_enable` 参数，简化代码结构
-- ✅ **删除重复代码**：移除 `sync_custom_lists()` 方法（与 `sync()` 中逻辑重复）
-- ✅ **删除冗余 API**：移除 `/sync_custom_lists` API 端点和 `trakt_sync_custom_lists` 工作流动作
-- ✅ **增强调试日志**：添加配置加载、同步开始、订阅添加的详细日志
-- ✅ **代码优化**：减少约 126 行代码（5.9%），提升可维护性
 - ✅ **新增远程命令**：`/trakt_code` 快速提交授权码更新Token
 - ✅ **新增API端点**：`/auth` 接收Trakt OAuth授权回调
 - ✅ **自动授权支持**：配置域名后实现一键授权，无需手动操作
