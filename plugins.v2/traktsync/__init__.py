@@ -133,7 +133,7 @@ class TraktSync(_PluginBase):
                     logger.error("Token获取失败，请检查授权码是否正确")
 
             # 调试日志：记录配置加载状态
-            logger.info(f"【配置加载】enabled={self._enabled}, add_and_enable={self._add_and_enable}, sync_type={self._sync_type}, onlyonce={self._onlyonce}")
+            logger.debug(f"【配置加载】enabled={self._enabled}, add_and_enable={self._add_and_enable}, sync_type={self._sync_type}, onlyonce={self._onlyonce}")
         # 立即运行一次
         if self._enabled or self._onlyonce:
             if self._onlyonce:
@@ -1386,7 +1386,7 @@ class TraktSync(_PluginBase):
                 logger.debug("Access token未过期，无需刷新")
                 return True
 
-        logger.info("正在刷新Trakt access token...")
+        logger.debug("正在刷新Trakt access token...")
 
         try:
             # 发起 token refresh 请求
@@ -1450,7 +1450,7 @@ class TraktSync(_PluginBase):
             # 持久化配置
             self.__update_config()
 
-            logger.info(f"Access token刷新成功，有效期至 {self._token_expires_at.isoformat()}")
+            logger.debug(f"Access token刷新成功，有效期至 {self._token_expires_at.isoformat()}")
             return True
 
         except Exception as e:
@@ -1577,19 +1577,25 @@ class TraktSync(_PluginBase):
             logger.info(f'{mediainfo.title_year} {exist_msg}')
             action = "exist"
             is_new = False
-        elif self.__is_subscribed(tmdb_id, media_type):
-            logger.info(f'{mediainfo.title_year} 已在订阅中')
-            action = "subscribe"
-            is_new = False
         else:
-            # 添加订阅
-            is_new = self.__add_subscribe(mediainfo, meta)
-            # 根据 add_and_enable 设置 action
-            if is_new:
-                action = "subscribe" if self._add_and_enable else "add"
+            # 检查订阅状态
+            subscribed, sub_state = self.__is_subscribed(tmdb_id, media_type)
+            if subscribed:
+                logger.info(f'{mediainfo.title_year} 已在订阅中 (状态：{sub_state})')
+                # 如果当前是暂停订阅但配置要求启用，更新状态
+                if sub_state == "S" and self._add_and_enable:
+                    logger.info(f'{mediainfo.title_year} 订阅状态为暂停，更新为激活状态')
+                    self.__update_subscribe_state(tmdb_id, media_type, "N")
+                action = "subscribe"
+                is_new = False
             else:
-                action = "exist"
-
+                # 添加订阅
+                is_new = self.__add_subscribe(mediainfo, meta)
+                # 根据 add_and_enable 设置 action
+                if is_new:
+                    action = "subscribe" if self._add_and_enable else "add"
+                else:
+                    action = "exist"
         # 存储历史记录
         history_item = {
             "action": action,
@@ -1661,19 +1667,25 @@ class TraktSync(_PluginBase):
             logger.info(f'{mediainfo.title_year} 第{season_number}季 媒体库中已存在')
             action = "exist"
             is_new = False
-        elif self.__is_subscribed(tmdb_id, MediaType.TV):
-            logger.info(f'{mediainfo.title_year} 第{season_number}季 已在订阅中')
-            action = "subscribe"
-            is_new = False
         else:
-            # 添加订阅
-            is_new = self.__add_subscribe(mediainfo, meta)
-            # 根据 add_and_enable 设置 action
-            if is_new:
-                action = "subscribe" if self._add_and_enable else "add"
+            # 检查订阅状态
+            subscribed, sub_state = self.__is_subscribed(tmdb_id, MediaType.TV)
+            if subscribed:
+                logger.info(f'{mediainfo.title_year} 第{season_number}季 已在订阅中 (状态：{sub_state})')
+                # 如果当前是暂停订阅但配置要求启用，更新状态
+                if sub_state == "S" and self._add_and_enable:
+                    logger.info(f'{mediainfo.title_year} 第{season_number}季 订阅状态为暂停，更新为激活状态')
+                    self.__update_subscribe_state(tmdb_id, MediaType.TV, "N")
+                action = "subscribe"
+                is_new = False
             else:
-                action = "exist"
-
+                # 添加订阅
+                is_new = self.__add_subscribe(mediainfo, meta)
+                # 根据 add_and_enable 设置 action
+                if is_new:
+                    action = "subscribe" if self._add_and_enable else "add"
+                else:
+                    action = "exist"
         # 存储历史记录
         history_item = {
             "action": action,
@@ -1693,16 +1705,43 @@ class TraktSync(_PluginBase):
             "history": history_item
         }
 
-    def __is_subscribed(self, tmdb_id: int, mtype: MediaType) -> bool:
+    def __is_subscribed(self, tmdb_id: int, mtype: MediaType) -> Tuple[bool, Optional[str]]:
         """
         检查是否已订阅
         :param tmdb_id: TMDB ID
         :param mtype: 媒体类型
-        :return: 是否已订阅
+        :return: (是否已订阅，订阅状态)
         """
         subscribeoper = SubscribeOper()
         subscribes = subscribeoper.list_by_tmdbid(tmdbid=tmdb_id)
-        return len(subscribes) > 0 if subscribes else False
+        if subscribes:
+            state = subscribes[0].state
+            logger.debug(f"检查订阅：TMDB {tmdb_id}, 订阅状态={state}")
+            return True, state
+        return False, None
+
+    def __update_subscribe_state(self, tmdb_id: int, mtype: MediaType, state: str) -> bool:
+        """
+        更新订阅状态
+        :param tmdb_id: TMDB ID
+        :param mtype: 媒体类型
+        :param state: 新状态 (N-激活，S-暂停)
+        :return: 是否成功
+        """
+        try:
+            subscribeoper = SubscribeOper()
+            subscribes = subscribeoper.list_by_tmdbid(tmdbid=tmdb_id)
+            if subscribes:
+                subscribe = subscribes[0]
+                subscribe.state = state
+                subscribe.update(self._db)
+                status_text = "激活订阅" if state == "N" else "暂停订阅"
+                logger.info(f"更新订阅状态成功：TMDB {tmdb_id}, 状态：{status_text}")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"更新订阅状态失败：TMDB {tmdb_id}, 错误：{str(e)}")
+            return False
 
     def __add_subscribe(self, mediainfo, meta) -> bool:
         """
