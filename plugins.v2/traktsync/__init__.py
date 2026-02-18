@@ -1710,10 +1710,10 @@ class TraktSync(_PluginBase):
         :return: 是否成功添加新订阅
         """
         try:
-            state = 'N' if self._add_and_enable else 'S'
-            logger.debug(f"添加订阅: {mediainfo.title_year}, state={state}")
+            desired_state = 'N' if self._add_and_enable else 'S'
+            logger.debug(f"添加订阅: {mediainfo.title_year}, desired_state={desired_state}")
 
-            subscribe_id, message = SubscribeChain().add(
+            subscribe_id, msg = SubscribeChain().add(
                 title=mediainfo.title,
                 year=mediainfo.year,
                 mtype=mediainfo.type,
@@ -1721,14 +1721,20 @@ class TraktSync(_PluginBase):
                 season=meta.begin_season if mediainfo.type == MediaType.TV else None,
                 exist_ok=True,
                 username="Trakt想看",
-                state=state
+                state=desired_state
             )
             if subscribe_id:
-                status_text = "激活" if state == 'N' else "暂停"
+                # 校验并修正状态，防止 state 在 kwargs 透传中被丢弃
+                subscribe = SubscribeOper().get(subscribe_id)
+                if subscribe and subscribe.state != desired_state:
+                    logger.debug(f"订阅状态不符预期: {mediainfo.title_year}, "
+                                 f"当前={subscribe.state}, 期望={desired_state}，正在修正")
+                    SubscribeOper().update(subscribe_id, {'state': desired_state})
+                status_text = "激活" if desired_state == 'N' else "暂停"
                 logger.info(f"添加订阅成功: {mediainfo.title_year} ({status_text})")
                 return True
             else:
-                logger.error(f"添加订阅失败: {mediainfo.title_year} - {message}")
+                logger.error(f"添加订阅失败: {mediainfo.title_year} - {msg}")
                 return False
         except Exception as e:
             logger.error(f"添加订阅异常: {mediainfo.title_year} - {str(e)}")
