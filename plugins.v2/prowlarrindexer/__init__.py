@@ -653,9 +653,9 @@ class ProwlarrIndexer(_PluginBase):
                     logger.error(f"【{self.plugin_name}】停止定时任务失败：{str(e)}")
 
             # 恢复搜索链原始方法
-        self._remove_search_patch()
+            self._remove_search_patch()
 
-        # Note: We intentionally do NOT unregister indexers from site management
+            # Note: We intentionally do NOT unregister indexers from site management
             # This allows sites to persist between plugin restarts and MoviePilot reboots
             # If you need to remove sites, disable them manually in the site management UI
             if self._indexers:
