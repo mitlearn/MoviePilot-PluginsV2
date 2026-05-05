@@ -12,6 +12,7 @@ Author: Claude
 import re
 import traceback
 import xml.dom.minidom
+import copy
 from typing import List, Dict, Optional, Any, Tuple, Callable
 from datetime import datetime
 from urllib.parse import urlencode
@@ -193,6 +194,11 @@ class JackettIndexer(_PluginBase):
                     continue
 
             logger.info(f"【{self.plugin_name}】成功获取 {len(self._indexers)} 个索引器（私有+半公开），过滤掉 {filtered_count} 个公开站点，{xxx_filtered_count} 个XXX专属站点")
+
+            # Add aggregate indexer for searching all indexers at once
+            if self._indexers:
+                self._add_aggregate_indexer()
+
             return True
 
         except Exception as e:
@@ -505,6 +511,68 @@ class JackettIndexer(_PluginBase):
             indexer_dict["category"] = category
 
         return indexer_dict, is_xxx_only
+
+    def _add_aggregate_indexer(self):
+        """
+        添加特殊的聚合索引器，可以一次性搜索所有索引器。
+        这允许用户通过单个站点搜索所有 Jackett 索引器。
+        """
+        try:
+            aggregate_indexer = {
+                "id": f"{self.plugin_name}-全部搜索",
+                "name": f"{self.plugin_name}-全部搜索",
+                "url": f"{self._host.rstrip('/')}/api/v2.0/indexers/all/results/torznab/",
+                "domain": "jackett_indexer.aggregate",
+                "public": False,
+                "privacy": "private",
+                "proxy": False,
+                "is_aggregate": True,  # Mark as aggregate indexer
+                # Combine all categories from all indexers
+                "category": self._build_aggregate_categories(),
+            }
+
+            self._indexers.append(aggregate_indexer)
+            logger.info(f"【{self.plugin_name}】已添加聚合索引器：{aggregate_indexer.get('name')}")
+        except Exception as e:
+            logger.error(f"【{self.plugin_name}】添加聚合索引器失败：{str(e)}")
+
+    def _build_aggregate_categories(self) -> Optional[Dict[str, List[Dict[str, Any]]]]:
+        """
+        为聚合索引器从所有索引器构建合并的分类。
+        """
+        try:
+            combined_categories = {"movie": [], "tv": []}
+            seen_movie_ids = set()
+            seen_tv_ids = set()
+
+            # 从所有真实索引器收集唯一的分类
+            for indexer in self._indexers:
+                if indexer.get("is_aggregate"):
+                    continue
+
+                category = indexer.get("category")
+                if not category:
+                    continue
+
+                # 添加电影分类
+                for cat in category.get("movie", []):
+                    cat_id = cat.get("id")
+                    if cat_id not in seen_movie_ids:
+                        combined_categories["movie"].append(cat)
+                        seen_movie_ids.add(cat_id)
+
+                # 添加电视分类
+                for cat in category.get("tv", []):
+                    cat_id = cat.get("id")
+                    if cat_id not in seen_tv_ids:
+                        combined_categories["tv"].append(cat)
+                        seen_tv_ids.add(cat_id)
+
+            return combined_categories if (combined_categories.get("movie") or combined_categories.get("tv")) else None
+        except Exception as e:
+            logger.debug(f"【{self.plugin_name}】构建聚合分类失败：{str(e)}")
+            return None
+
 
     def _build_rss_url(self, indexer_name: str, category: Optional[Dict[str, List[Dict[str, Any]]]] = None) -> str:
         """
@@ -830,6 +898,11 @@ class JackettIndexer(_PluginBase):
 
         logger.info(f"【{self.plugin_name}】开始浏览站点最新种子：{site_name}，索引器：{indexer_name}")
 
+        # 检查是否为聚合索引器
+        if indexer_name == "aggregate":
+            logger.info(f"【{self.plugin_name}】聚合索引器不支持 Spider 模式浏览，跳过")
+            return []
+
         try:
             params = {
                 "apikey": self._api_key,
@@ -949,6 +1022,13 @@ class JackettIndexer(_PluginBase):
 
             logger.debug(f"【{self.plugin_name}】从domain提取索引器ID：{indexer_name}")
 
+            # 检查是否为聚合索引器
+            if indexer_name == "aggregate":
+                logger.info(f"【{self.plugin_name}】检测到聚合索引器搜索，将并发搜索所有索引器")
+                results = self._search_aggregate_indexers(keyword, mtype, page)
+                logger.info(f"【{self.plugin_name}】聚合搜索完成：{site_name} 返回 {len(results)} 个结果")
+                return results
+
             # Build search parameters
             search_params = self._build_search_params(
                 keyword=keyword,
@@ -1051,6 +1131,145 @@ class JackettIndexer(_PluginBase):
             return [5000]  # TV shows
         else:
             return [2000, 5000]
+
+    def _search_aggregate_indexers(
+        self,
+        keyword: str,
+        mtype: Optional[MediaType] = None,
+        page: int = 0
+    ) -> List[TorrentInfo]:
+        """
+        并发搜索所有真实索引器（不包括聚合索引器本身）。
+        返回所有索引器的合并结果。
+
+        参数：
+            keyword: 搜索关键词
+            mtype: 媒体类型（电影、电视或 None）
+            page: 页码
+
+        返回：
+            TorrentInfo 对象合并列表
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        try:
+            # 获取所有真实索引器（排除聚合索引器本身）
+            real_indexers = [
+                idx for idx in self._indexers
+                if not idx.get("is_aggregate", False)
+            ]
+
+            if not real_indexers:
+                logger.warning(f"【{self.plugin_name}】没有可用的真实索引器进行聚合搜索")
+                return []
+
+            logger.info(f"【{self.plugin_name}】开始并发搜索 {len(real_indexers)} 个索引器，关键词：{keyword}")
+
+            all_results = []
+            seen_titles = set()  # 用于去重
+
+            # 使用 ThreadPoolExecutor 进行并发搜索
+            with ThreadPoolExecutor(max_workers=min(len(real_indexers), 10)) as executor:
+                # 提交所有搜索任务
+                futures = {
+                    executor.submit(self.search_torrents, indexer, keyword, mtype, page): indexer
+                    for indexer in real_indexers
+                }
+
+                # 随任务完成收集结果
+                for future in as_completed(futures):
+                    try:
+                        indexer = futures[future]
+                        results = future.result()
+
+                        if results:
+                            logger.debug(f"【{self.plugin_name}】索引器 {indexer.get('name')} 返回 {len(results)} 个结果")
+                            # 添加带有去重逻辑的结果
+                            for result in results:
+                                title_key = (result.title, result.size)
+                                if title_key not in seen_titles:
+                                    all_results.append(result)
+                                    seen_titles.add(title_key)
+                    except Exception as e:
+                        indexer = futures[future]
+                        logger.warning(f"【{self.plugin_name}】搜索索引器 {indexer.get('name')} 失败：{str(e)}")
+                        continue
+
+            # 按做种人数降序排列
+            all_results.sort(key=lambda x: x.seeders, reverse=True)
+
+            logger.info(f"【{self.plugin_name}】聚合搜索完成，共获得 {len(all_results)} 个去重结果")
+            return all_results
+
+        except Exception as e:
+            logger.error(f"【{self.plugin_name}】聚合搜索异常：{str(e)}\n{traceback.format_exc()}")
+            return []
+
+    def _refresh_aggregate_indexers(self, page: int = 0) -> List[TorrentInfo]:
+        """
+        并发浏览所有索引器的最新种子。
+        返回所有索引器的合并结果。
+
+        参数：
+            page: 分页页码
+
+        返回：
+            TorrentInfo 对象合并列表
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        try:
+            # 获取所有真实索引器（排除聚合索引器本身）
+            real_indexers = [
+                idx for idx in self._indexers
+                if not idx.get("is_aggregate", False)
+            ]
+
+            if not real_indexers:
+                logger.warning(f"【{self.plugin_name}】没有可用的真实索引器进行聚合浏览")
+                return []
+
+            logger.info(f"【{self.plugin_name}】开始并发浏览 {len(real_indexers)} 个索引器的最新种子")
+
+            all_results = []
+            seen_titles = set()  # 用于去重
+
+            # 使用 ThreadPoolExecutor 进行并发浏览操作
+            with ThreadPoolExecutor(max_workers=min(len(real_indexers), 10)) as executor:
+                # 提交所有刷新任务
+                futures = {
+                    executor.submit(self.refresh_torrents, indexer, None, None, page): indexer
+                    for indexer in real_indexers
+                }
+
+                # 随任务完成收集结果
+                for future in as_completed(futures):
+                    try:
+                        indexer = futures[future]
+                        results = future.result()
+
+                        if results:
+                            logger.debug(f"【{self.plugin_name}】索引器 {indexer.get('name')} 浏览返回 {len(results)} 个种子")
+                            # 添加带有去重逻辑的结果
+                            for result in results:
+                                title_key = (result.title, result.size)
+                                if title_key not in seen_titles:
+                                    all_results.append(result)
+                                    seen_titles.add(title_key)
+                    except Exception as e:
+                        indexer = futures[future]
+                        logger.warning(f"【{self.plugin_name}】浏览索引器 {indexer.get('name')} 失败：{str(e)}")
+                        continue
+
+            # 按做种人数降序排列
+            all_results.sort(key=lambda x: x.seeders, reverse=True)
+
+            logger.info(f"【{self.plugin_name}】聚合浏览完成，共获得 {len(all_results)} 个去重种子")
+            return all_results
+
+        except Exception as e:
+            logger.error(f"【{self.plugin_name}】聚合浏览异常：{str(e)}\n{traceback.format_exc()}")
+            return []
 
     def _search_jackett_api(self, indexer_name: str, params: Dict[str, Any]) -> Optional[str]:
         """
