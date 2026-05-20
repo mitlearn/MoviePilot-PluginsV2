@@ -118,7 +118,7 @@ class JackettIndexer(_PluginBase):
         # Setup scheduler for periodic sync
         if self._cron:
             try:
-                self._scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
+                self._scheduler = BackgroundScheduler(timezone="Asia/Tokyo")
                 self._scheduler.add_job(
                     func=self._sync_indexers,
                     trigger=CronTrigger.from_crontab(self._cron),
@@ -177,10 +177,10 @@ class JackettIndexer(_PluginBase):
                     indexer_dict, is_xxx_only = self._build_indexer_dict(indexer_data)
 
                     # 过滤掉公开站点，保留私有和半公开站点
-                    if indexer_dict.get("public", False):
-                        logger.info(f"【{self.plugin_name}】过滤公开站点：{indexer_dict.get('name', 'Unknown')}")
-                        filtered_count += 1
-                        continue
+                    # if indexer_dict.get("public", False):
+                    #     logger.info(f"【{self.plugin_name}】过滤公开站点：{indexer_dict.get('name', 'Unknown')}")
+                    #     filtered_count += 1
+                    #     continue
 
                     # 过滤掉只有XXX分类的索引器
                     if is_xxx_only:
