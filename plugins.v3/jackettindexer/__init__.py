@@ -38,6 +38,8 @@ class JackettIndexer(_PluginBase):
         self._api_key = ""
         self._proxy = False
         self._cron = "0 0 */12 * *"
+        self._onlyonce = False
+        self._last_update: datetime | None = None
         # Fix #9: 用 _lock 保护 _indexers，_sync_indexers 完成后原子替换
         self._indexers: list[dict[str, Any]] = []
         self._lock = threading.Lock()
@@ -51,6 +53,7 @@ class JackettIndexer(_PluginBase):
         self._api_key = str(config.get("api_key") or "")
         self._proxy = config.get("proxy") or False
         self._cron = str(config.get("cron") or self._cron)
+        self._onlyonce = bool(config.get("onlyonce"))
         if not self._enabled or not self._host or not self._api_key:
             return
         # Fix #11: 校验 host 格式
@@ -59,12 +62,19 @@ class JackettIndexer(_PluginBase):
             logger.error("Jackett地址格式无效（需要包含 http:// 或 https://）：%s", self._host)
             return
         self._sync_indexers()
+        if self._onlyonce:
+            self._onlyonce = False
+            self.update_config({**config, "onlyonce": False})
 
     def _request(self, indexer: str, params: dict[str, Any]) -> str | None:
         response = RequestUtils(proxies=self._proxy).get_res(
             url=f"{self._host}/api/v2.0/indexers/{indexer}/results/torznab/api",
             params={**params, "apikey": self._api_key}, timeout=60)
-        if not response or response.status_code != 200:
+        if response is None:
+            logger.warning("Jackett请求无响应：%s", indexer)
+            return None
+        if response.status_code != 200:
+            logger.warning("Jackett请求失败：HTTP %s，索引器 %s，响应：%s", response.status_code, indexer, response.text[:500])
             return None
         return response.text
 
@@ -72,9 +82,12 @@ class JackettIndexer(_PluginBase):
         response = RequestUtils(proxies=self._proxy).get_res(
             url=f"{self._host}/api/v2.0/indexers/all/results/torznab/api",
             params={"apikey": self._api_key, "t": "indexers", "configured": "true"}, timeout=30)
-        if not response or response.status_code != 200:
-            # Fix #7: 失败时记录日志
+        if response is None:
             logger.warning("Jackett索引器同步失败：无法连接到 %s", self._host)
+            return False
+        if response.status_code != 200:
+            # Fix #7: 失败时记录日志
+            logger.warning("Jackett索引器同步失败：HTTP %s，响应：%s", response.status_code, response.text[:500])
             return False
         try:
             root = ET.fromstring(response.text)
@@ -98,6 +111,7 @@ class JackettIndexer(_PluginBase):
         # Fix #9: 原子替换，避免搜索线程读到中间状态
         with self._lock:
             self._indexers = current
+        self._last_update = datetime.now()
         logger.info("Jackett索引器同步完成，共注册 %d 个", len(current))
         return True
 
@@ -276,18 +290,44 @@ class JackettIndexer(_PluginBase):
 
     def get_form(self) -> tuple[list[dict], dict[str, Any]]:
         return [{"component": "VForm", "content": [
-            {"component": "VSwitch", "props": {"model": "enabled", "label": "启用插件"}},
-            {"component": "VTextField", "props": {"model": "host", "label": "Jackett地址"}},
+            {"component": "VRow", "content": [
+                {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
+                    {"component": "VSwitch", "props": {"model": "enabled", "label": "启用插件"}}
+                ]},
+                {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
+                    {"component": "VSwitch", "props": {"model": "onlyonce", "label": "立即运行一次", "hint": "保存后立即同步索引器列表", "persistent-hint": True}}
+                ]},
+            ]},
+            {"component": "VTextField", "props": {"model": "host", "label": "Jackett地址", "placeholder": "http://127.0.0.1:9117"}},
             {"component": "VTextField", "props": {"model": "api_key", "label": "API Key", "type": "password"}},
-            # Fix #4: 补充代理开关
             {"component": "VSwitch", "props": {"model": "proxy", "label": "使用代理"}},
-            {"component": "VTextField", "props": {"model": "cron", "label": "索引器同步 Cron"}},
-        ]}], {"enabled": False, "host": "", "api_key": "", "proxy": False, "cron": self._cron}
+            {"component": "VTextField", "props": {"model": "cron", "label": "索引器同步 Cron", "placeholder": "0 0 */12 * *"}},
+        ]}], {"enabled": False, "host": "", "api_key": "", "proxy": False, "cron": self._cron, "onlyonce": False}
 
     def get_page(self) -> list[dict]:
         with self._lock:
-            count = len(self._indexers)
-        return [{"component": "VAlert", "props": {"type": "info", "text": f"已注册 {count} 个Jackett索引器。"}}]
+            indexers = list(self._indexers)
+        status = "运行中" if self._enabled else "已停用"
+        updated = self._last_update.strftime("%Y-%m-%d %H:%M:%S") if self._last_update else "未同步"
+        rows = [
+            {"component": "VRow", "props": {"class": "text-caption align-center py-1 px-2"}, "content": [
+                {"component": "VCol", "props": {"cols": 5, "class": "text-truncate"}, "content": [{"component": "span", "text": site["name"]}]},
+                {"component": "VCol", "props": {"cols": 2}, "content": [{"component": "span", "text": "私有"}]},
+                {"component": "VCol", "props": {"cols": 3, "class": "text-truncate"}, "content": [{"component": "span", "text": site["domain"]}]},
+                {"component": "VCol", "props": {"cols": 2}, "content": [{"component": "a", "props": {"href": site["rss"], "target": "_blank", "title": site["rss"]}, "text": "RSS链接"}]},
+            ]}
+            for site in indexers
+        ]
+        header = {"component": "VRow", "props": {"class": "font-weight-bold text-caption align-center py-1 px-2"}, "content": [
+            {"component": "VCol", "props": {"cols": 5}, "content": [{"component": "span", "text": "索引器名称"}]},
+            {"component": "VCol", "props": {"cols": 2}, "content": [{"component": "span", "text": "隐私类型"}]},
+            {"component": "VCol", "props": {"cols": 3}, "content": [{"component": "span", "text": "站点域名"}]},
+            {"component": "VCol", "props": {"cols": 2}, "content": [{"component": "span", "text": "RSS"}]},
+        ]}
+        return [
+            {"component": "VAlert", "props": {"type": "success" if self._enabled else "info", "variant": "tonal", "text": f"状态：{status} | 最后同步：{updated} | 索引器数量：{len(indexers)}"}},
+            {"component": "VCard", "content": [{"component": "VCardText", "content": [{"component": "div", "props": {"style": "max-height:30rem; overflow-y:auto"}, "content": [header, *rows]}]}]},
+        ]
 
     def stop_service(self) -> None:
         with self._lock:
