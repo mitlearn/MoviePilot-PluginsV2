@@ -1,0 +1,24 @@
+{
+  "ProwlarrIndexer": {
+    "name": "Prowlarr索引器",
+    "description": "通过Prowlarr统一搜索已配置的私有和半公开索引器。",
+    "labels": "索引器,搜索",
+    "version": "3.0.0",
+    "icon": "Prowlarr.png",
+    "author": "GPT",
+    "level": 2,
+    "system_version": ">=3.0.0",
+    "history": {"v3.0.0": "V3 原生实现：使用标准搜索模块端口和宿主 RSS 浏览链路，支持音乐搜索。"}
+  },
+  "JackettIndexer": {
+    "name": "Jackett索引器",
+    "description": "通过Jackett/Torznab统一搜索已配置的私有和半公开索引器。",
+    "labels": "索引器,搜索",
+    "version": "3.0.0",
+    "icon": "Jackett_A.png",
+    "author": "GPT",
+    "level": 2,
+    "system_version": ">=3.0.0",
+    "history": {"v3.0.0": "V3 原生实现：使用标准搜索模块端口和宿主 RSS 浏览链路，支持音乐搜索。"}
+  }
+}
