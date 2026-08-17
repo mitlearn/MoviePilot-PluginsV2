@@ -3,7 +3,7 @@
     "name": "Prowlarr索引器",
     "description": "集成Prowlarr索引器搜索，支持多站点统一搜索、RSS订阅及Spider浏览。仅索引私有和半公开站点。",
     "labels": "站点,prowlarr,search,rss",
-    "version": "1.7.1",
+    "version": "1.7.0",
     "icon": "Prowlarr.png",
     "author": "Claude",
     "level": 2,
@@ -15,15 +15,14 @@
       "v1.4.0": "优化错误信息显示；调整日志等级；删除连通性测试；删除grabs字段；统一变量命名",
       "v1.5.0": "新增搜索API端点；支持外部调用搜索功能；支持指定索引器搜索；支持IMDb ID和关键词搜索",
       "v1.6.0": "当搜索词为中文时自动对本插件索引器使用英文标题补充搜索",
-      "v1.7.0": "新增RSS订阅支持；新增Spider模式浏览最新种子",
-      "v1.7.1": "修复空分类索引器注册、Prowlarr媒体分类识别、Jackett RSS端点、IMDb电影与TV搜索、host/Cron校验及索引器同步并发问题"
+      "v1.7.0": "新增RSS订阅支持；新增Spider模式浏览最新种子"
     }
   },
   "JackettIndexer": {
     "name": "Jackett索引器",
     "description": "集成Jackett索引器搜索，支持Torznab协议多站点搜索、RSS订阅及Spider浏览。仅索引私有和半公开站点。",
     "labels": "站点,jackett,search,rss",
-    "version": "1.7.1",
+    "version": "1.7.0",
     "icon": "Jackett_A.png",
     "author": "Claude",
     "level": 2,
@@ -35,8 +34,7 @@
       "v1.4.0": "优化错误信息显示；调整日志等级；删除连通性测试；统一变量命名",
       "v1.5.0": "新增搜索API端点；支持外部调用搜索功能；支持指定索引器搜索；支持IMDb ID和关键词搜索",
       "v1.6.0": "当搜索词为中文时自动对本插件索引器使用英文标题补充搜索",
-      "v1.7.0": "新增RSS订阅支持；新增Spider模式浏览最新种子",
-      "v1.7.1": "修复空分类索引器注册、Jackett RSS端点、IMDb电影与TV搜索、host/Cron校验及索引器同步并发问题"
+      "v1.7.0": "新增RSS订阅支持；新增Spider模式浏览最新种子"
     }
   },
   "TraktSync": {

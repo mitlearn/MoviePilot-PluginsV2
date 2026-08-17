@@ -9,14 +9,12 @@ Version: 0.1.0
 Author: Claude
 """
 
-import copy
 import re
 import traceback
-import threading
 import xml.dom.minidom
 from typing import List, Dict, Optional, Any, Tuple, Callable
 from datetime import datetime
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode
 import unicodedata
 
 from typing import Type
@@ -48,7 +46,7 @@ class JackettIndexer(_PluginBase):
     plugin_name = "Jackett索引器"
     plugin_desc = "集成Jackett索引器搜索，支持Torznab协议多站点搜索。仅索引私有和半公开站点。"
     plugin_icon = "Jackett_A.png"
-    plugin_version = "1.7.1"
+    plugin_version = "1.7.0"
     plugin_author = "Claude"
     author_url = "https://github.com"
     plugin_config_prefix = "jackettindexer_"
@@ -69,7 +67,6 @@ class JackettIndexer(_PluginBase):
     # 搜索链补丁：保存被替换的原始方法
     _original_search_all: Optional[Callable] = None
     _original_async_search_all: Optional[Callable] = None
-    _indexers_lock = threading.RLock()
 
     # Domain identifier for indexer (matching reference implementation pattern)
     # Format: plugin_name.author
@@ -110,8 +107,7 @@ class JackettIndexer(_PluginBase):
             return
 
         # Validate host format
-        parsed_host = urlparse(self._host)
-        if parsed_host.scheme not in ("http", "https") or not parsed_host.netloc:
+        if not self._host.startswith(("http://", "https://")):
             logger.error(f"【{self.plugin_name}】配置错误：服务器地址必须以 http:// 或 https:// 开头")
             return
 
@@ -129,7 +125,7 @@ class JackettIndexer(_PluginBase):
                 )
                 self._scheduler.start()
                 logger.info(f"【{self.plugin_name}】定时同步任务已启动，周期：{self._cron}")
-            except (ValueError, TypeError) as e:
+            except Exception as e:
                 logger.error(f"【{self.plugin_name}】定时任务创建失败：{str(e)}")
 
         # Handle run once flag
@@ -148,14 +144,12 @@ class JackettIndexer(_PluginBase):
 
         # Register indexers to site management (following official CustomIndexer pattern)
         # add_indexer will overwrite existing indexers with same domain
-        with self._indexers_lock:
-            indexers = list(self._indexers)
-        for indexer in indexers:
+        for indexer in self._indexers:
             domain = indexer.get("domain", "")
             self._sites_helper.add_indexer(domain, indexer)
             logger.debug(f"【{self.plugin_name}】注册到站点管理：{indexer.get('name')} (domain: {domain})")
 
-        logger.info(f"【{self.plugin_name}】插件初始化完成，共注册 {len(indexers)} 个索引器")
+        logger.info(f"【{self.plugin_name}】插件初始化完成，共注册 {len(self._indexers)} 个索引器")
 
         # 应用搜索链补丁：媒体搜索时对中文关键词自动回退英文标题
         self._apply_search_patch()
@@ -173,18 +167,13 @@ class JackettIndexer(_PluginBase):
                 logger.warning(f"【{self.plugin_name}】未获取到索引器列表")
                 return False
 
-            # Build a complete replacement before publishing it to search threads.
-            current_indexers = []
+            # Build indexer dicts
+            self._indexers = []
             filtered_count = 0
             xxx_filtered_count = 0
             for indexer_data in indexers:
                 try:
                     indexer_dict, is_xxx_only = self._build_indexer_dict(indexer_data)
-
-                    # A failed/empty caps response must not register a catch-all site.
-                    if not indexer_dict.get("category"):
-                        logger.warning(f"【{self.plugin_name}】跳过无有效分类的索引器：{indexer_dict.get('name', 'Unknown')}")
-                        continue
 
                     # 过滤掉公开站点，保留私有和半公开站点
                     if indexer_dict.get("public", False):
@@ -198,14 +187,12 @@ class JackettIndexer(_PluginBase):
                         xxx_filtered_count += 1
                         continue
 
-                    current_indexers.append(indexer_dict)
+                    self._indexers.append(indexer_dict)
                 except Exception as e:
                     logger.error(f"【{self.plugin_name}】构建索引器失败：{str(e)}")
                     continue
 
-            with self._indexers_lock:
-                self._indexers = current_indexers
-            logger.info(f"【{self.plugin_name}】成功获取 {len(current_indexers)} 个索引器（私有+半公开），过滤掉 {filtered_count} 个公开站点，{xxx_filtered_count} 个XXX专属站点")
+            logger.info(f"【{self.plugin_name}】成功获取 {len(self._indexers)} 个索引器（私有+半公开），过滤掉 {filtered_count} 个公开站点，{xxx_filtered_count} 个XXX专属站点")
             return True
 
         except Exception as e:
@@ -222,14 +209,11 @@ class JackettIndexer(_PluginBase):
         try:
             # Fetch indexers from Jackett
             if not self._fetch_and_build_indexers():
-                logger.warning(f"【{self.plugin_name}】索引器同步失败")
                 return False
 
             # Register indexers to site management
             registered_count = 0
-            with self._indexers_lock:
-                indexers = list(self._indexers)
-            for indexer in indexers:
+            for indexer in self._indexers:
                 domain = indexer.get("domain", "")
                 site_info = self._sites_helper.get_indexer(domain)
                 if not site_info:
@@ -239,7 +223,7 @@ class JackettIndexer(_PluginBase):
                     registered_count += 1
 
             self._last_update = datetime.now()
-            logger.info(f"【{self.plugin_name}】索引器同步完成，总计 {len(indexers)} 个，新增 {registered_count} 个")
+            logger.info(f"【{self.plugin_name}】索引器同步完成，总计 {len(self._indexers)} 个，新增 {registered_count} 个")
             return True
 
         except Exception as e:
@@ -549,7 +533,8 @@ class JackettIndexer(_PluginBase):
 
         params = [
             ("apikey", self._api_key),
-            ("t", "rss"),
+            ("t", "search"),
+            ("q", ""),
             ("cat", ",".join(cat_ids)),
             ("limit", 30),
         ]
@@ -670,10 +655,8 @@ class JackettIndexer(_PluginBase):
         from app.schemas.types import SystemConfigKey
 
         enabled_ids = sites or SystemConfigOper().get(SystemConfigKey.IndexerSites) or []
-        with self._indexers_lock:
-            indexer_snapshot = list(self._indexers)
         indexers = [
-            idx for idx in indexer_snapshot
+            idx for idx in list(self._indexers)
             if not enabled_ids or idx.get("id") in enabled_ids
         ]
         if not indexers:
@@ -707,10 +690,8 @@ class JackettIndexer(_PluginBase):
         from app.schemas.types import SystemConfigKey
 
         enabled_ids = sites or SystemConfigOper().get(SystemConfigKey.IndexerSites) or []
-        with self._indexers_lock:
-            indexer_snapshot = list(self._indexers)
         indexers = [
-            idx for idx in indexer_snapshot
+            idx for idx in list(self._indexers)
             if not enabled_ids or idx.get("id") in enabled_ids
         ]
         if not indexers:
@@ -765,11 +746,9 @@ class JackettIndexer(_PluginBase):
             # Note: We intentionally do NOT unregister indexers from site management
             # This allows sites to persist between plugin restarts and MoviePilot reboots
             # If you need to remove sites, disable them manually in the site management UI
-            with self._indexers_lock:
-                indexer_count = len(self._indexers)
+            if self._indexers:
+                logger.info(f"【{self.plugin_name}】服务已停止，{len(self._indexers)} 个索引器保留在站点管理中")
                 self._indexers = []
-            if indexer_count:
-                logger.info(f"【{self.plugin_name}】服务已停止，{indexer_count} 个索引器保留在站点管理中")
 
         except Exception as e:
             logger.error(f"【{self.plugin_name}】停止服务异常：{str(e)}")
@@ -791,7 +770,6 @@ class JackettIndexer(_PluginBase):
             "async_search_torrents": self.async_search_torrents,
             "refresh_torrents": self.refresh_torrents,
             "async_refresh_torrents": self.async_refresh_torrents,
-            "get_search_page_size": lambda site, keyword=None: 100 if site is not None else None,
         }
         logger.debug(f"【{self.plugin_name}】get_module 被调用，注册 search_torrents/async_search_torrents/refresh_torrents 方法")
         return result
@@ -980,30 +958,21 @@ class JackettIndexer(_PluginBase):
 
             logger.debug(f"【{self.plugin_name}】开始搜索站点：{site_name}，关键词：{keyword}，索引器ID：{indexer_name}")
 
-            # IMDb does not identify a media type in V2's module contract. Query both
-            # Torznab endpoints so TV results are not lost to the movie default.
-            params_list = [search_params]
-            if self._is_imdb_id(keyword) and mtype is None:
-                imdb_id = keyword[2:]
-                params_list = [
-                    {**search_params, "t": "movie", "imdbid": imdb_id},
-                    {**search_params, "t": "tvsearch", "imdbid": imdb_id},
-                ]
+            # Execute search API call
+            xml_content = self._search_jackett_api(indexer_name, search_params)
 
-            seen_enclosures = set()
-            for params in params_list:
-                xml_content = self._search_jackett_api(indexer_name, params)
-                if not xml_content:
-                    continue
-                if not isinstance(xml_content, str):
-                    logger.error(f"【{self.plugin_name}】搜索返回了非字符串类型的结果：{type(xml_content)}")
-                    continue
-                logger.debug(f"【{self.plugin_name}】索引器 [{indexer_name}] 开始解析XML内容，长度：{len(xml_content)}")
-                for torrent in self._parse_torznab_xml(xml_content, site_name):
-                    if torrent.enclosure in seen_enclosures:
-                        continue
-                    seen_enclosures.add(torrent.enclosure)
-                    results.append(torrent)
+            if not xml_content:
+                logger.debug(f"【{self.plugin_name}】搜索未返回结果")
+                return results
+
+            # Additional safety check for xml_content type
+            if not isinstance(xml_content, str):
+                logger.error(f"【{self.plugin_name}】搜索返回了非字符串类型的结果：{type(xml_content)}")
+                return results
+
+            # Parse XML results to TorrentInfo
+            logger.debug(f"【{self.plugin_name}】索引器 [{indexer_name}] 开始解析XML内容，长度：{len(xml_content)}")
+            results = self._parse_torznab_xml(xml_content, site_name)
 
             logger.info(f"【{self.plugin_name}】搜索完成：{site_name} 返回 {len(results)} 个结果")
 
@@ -1050,8 +1019,7 @@ class JackettIndexer(_PluginBase):
             else:
                 # Default to movie search for IMDb IDs
                 params["t"] = "movie"
-            # MoviePilot supplies tt1234567, while Torznab expects the numeric ID.
-            params["imdbid"] = keyword[2:]
+            params["imdbid"] = keyword
             logger.debug(f"【{self.plugin_name}】检测到IMDb ID搜索：{keyword}，使用 {params['t']} 模式")
         else:
             # Regular keyword search
@@ -1848,8 +1816,7 @@ class JackettIndexer(_PluginBase):
         Returns:
             List of indexer dictionaries
         """
-        with self._indexers_lock:
-            return list(self._indexers)
+        return self._indexers if self._indexers else []
 
     def api_search(self, keyword: str, indexer_name: str = None, mtype: str = None, page: int = 0) -> List[Dict[str, Any]]:
         """
